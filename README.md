@@ -9,6 +9,25 @@ Phần mềm ghi nhận xe vào / ra bằng 2 camera Imou (cổng vào, cổng r
 | `run.bat` | Nhấp đúp để chạy. Lần đầu tự cài Python và thư viện (cần Internet). |
 | `tao_shortcut.bat` | Tạo biểu tượng **Quan ly nha xe** (logo VIDATEX) ngoài Desktop, mở không hiện cửa sổ đen. Chạy `run.bat` ít nhất 1 lần trước. |
 
+### Kết nối camera
+Lần đầu chạy, nếu chưa cấu hình camera, phần mềm **tự dò cả dải mạng** và hiện danh sách camera tìm được
+(thiết bị nào mở cổng 554 thì là camera). Hai camera đầu được gán sẵn cổng vào / cổng ra, bạn chỉ cần nhập
+**Safety Code** in trên tem dán dưới đáy mỗi camera rồi bấm **Kiểm tra và lưu**.
+
+Mã này không dò tự động được — nó chỉ in trên thân máy, không có trong vỏ hộp và không suy ra được từ S/N.
+
+Khi kiểm tra, phần mềm hỏi thẳng camera bằng giao thức RTSP nên báo đúng việc cần sửa:
+
+| Báo lỗi | Phải làm gì |
+|---|---|
+| Sai Safety Code | Xem lại tem dán dưới đáy camera, phân biệt chữ hoa / thường |
+| Camera không hỗ trợ RTSP / không có đường dẫn này | Mở app Imou Life → camera → ⚙ Cài đặt → bật **RTSP** |
+| Camera không trả lời | Camera mất điện, hoặc không cùng mạng với máy tính |
+| Camera đã hết chỗ cho máy xem | Thoát app Imou Life trên điện thoại rồi thử lại |
+
+Phần mềm tự thử nhiều kiểu địa chỉ RTSP khác nhau và lưu lại kiểu chạy được, nên không phải tra đời camera.
+Mở lại cửa sổ này bất cứ lúc nào bằng **⚙ Cài đặt → Camera → Tự tìm camera trong mạng**.
+
 ### Chép sang máy khác
 Chép cả thư mục `NhaXe` rồi chạy `run.bat`. Máy chưa có Python thì nó tự tải và cài (cần Internet, khoảng 26 MB).
 

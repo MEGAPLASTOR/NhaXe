@@ -14,11 +14,8 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-import cv2
+from .rtsp import RTSP_PORT, describe, find_stream
 
-from .camera import camera_source
-
-RTSP_PORT = 554
 WEB_PORT = 80
 SCAN_WORKERS = 120
 # Đầu địa chỉ MAC (OUI) của Dahua - hãng sản xuất camera Imou
@@ -95,29 +92,29 @@ def scan(progress=None, timeout=0.6, stop=None):
             if stop is not None and stop():
                 break
     macs = mac_table()
-    cams = [{"ip": ip, "mac": macs.get(ip, ""), "imou": is_imou(macs.get(ip, "")),
-             "web": _port_open(ip, WEB_PORT, 0.4)} for ip in found]
+    cams = []
+    for ip in found:
+        mac = macs.get(ip, "")
+        hello = describe(ip)  # chào hỏi không mật khẩu, chỉ để đọc tên hãng camera trả về
+        cams.append({"ip": ip, "mac": mac, "server": hello["server"],
+                     "imou": is_imou(mac) or "dahua" in hello["server"].lower(),
+                     "web": _port_open(ip, WEB_PORT, 0.4)})
     cams.sort(key=lambda c: (not c["imou"], [int(p) for p in c["ip"].split(".")]))
     return cams
 
 
-def test_login(ip, password, user="admin", stream="0", timeout_ms=8000):
+def test_login(ip, password, user="admin", stream="0"):
     """
-    Thử mở luồng RTSP để biết mật khẩu có đúng không.
-    Trả về (được hay không, lời nhắn).
+    Tự thử các đường dẫn RTSP của camera này. Trả về (được hay không, lời nhắn, địa chỉ RTSP dùng được).
+    Hỏi thẳng camera nên biết rõ sai mật khẩu hay sai đường dẫn, thay vì chỉ "mở không được".
     """
-    url = camera_source({"ip": ip, "tai_khoan": user, "mat_khau": password, "luong": stream, "url": ""})
-    params = []
-    for prop, value in (("CAP_PROP_OPEN_TIMEOUT_MSEC", timeout_ms), ("CAP_PROP_READ_TIMEOUT_MSEC", timeout_ms)):
-        if hasattr(cv2, prop):
-            params += [getattr(cv2, prop), value]
-    cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG, params)
-    try:
-        if not cap.isOpened():
-            return False, "Không mở được camera — sai Safety Code, hoặc camera chưa bật RTSP"
-        ok, frame = cap.read()
-        if not ok or frame is None:
-            return False, "Kết nối được nhưng chưa lấy được hình — thử lại hoặc đổi sang luồng Mượt"
-        return True, f"Đã kết nối, hình {frame.shape[1]}x{frame.shape[0]}"
-    finally:
-        cap.release()
+    url, message, code = find_stream(ip, password, user, stream)
+    if url:
+        return True, message, url
+    if code == 401:
+        message = "Sai Safety Code — xem lại tem dán dưới đáy camera"
+    elif code is None:
+        message += " — kiểm tra camera còn cắm điện và cùng mạng không"
+    elif code in (404, 501):
+        message += " — vào app Imou Life bật RTSP cho camera này"
+    return False, message, None

@@ -154,8 +154,8 @@ class CameraSetupDialog(ModalDialog):
         results = {}
         for gate, row in chosen.items():
             self.after(0, row.mark, "Đang kiểm tra...", C["muted"])
-            ok, message = test_login(row.ip, row.code())
-            results[gate] = (ok, message)
+            ok, message, url = test_login(row.ip, row.code())
+            results[gate] = (ok, message, url)
             self.after(0, row.mark, message, C["in_text"] if ok else C["danger"])
         self.after(0, self._tested, chosen, results)
 
@@ -163,12 +163,13 @@ class CameraSetupDialog(ModalDialog):
         if not self.winfo_exists():
             return
         self._set_busy(False)
-        hong = [GATES[g] for g, (ok, _) in results.items() if not ok]
+        hong = [GATES[g] for g, (ok, *_) in results.items() if not ok]
         if hong:
             return self.set_status(f"Chưa kết nối được camera {', '.join(hong)} — xem chi tiết ở từng dòng", "error")
         cameras = {section: dict(cam) for section, cam in self.cameras.items()}
         for gate, row in chosen.items():  # cổng không được gán thì giữ nguyên cài đặt cũ
-            cameras[gate].update(ip=row.ip, tai_khoan="admin", mat_khau=row.code(), url="")
+            # lưu luôn địa chỉ RTSP vừa dò ra được, khỏi phải đoán lại đời camera mỗi lần mở
+            cameras[gate].update(ip=row.ip, tai_khoan="admin", mat_khau=row.code(), url=results[gate][2] or "")
         self.close()
         self.on_save(cameras)
 
@@ -195,14 +196,16 @@ class _CameraRow(ctk.CTkFrame):
         self.gate = gate
         self.on_gate = on_gate
 
-        left = ctk.CTkFrame(self, fg_color="transparent")
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.pack(fill="x")
+        left = ctk.CTkFrame(top, fg_color="transparent")
         left.pack(side="left", padx=(16, 10), pady=12)
         ctk.CTkLabel(left, text=self.ip, font=font(17, True), text_color=C["text"], height=24).pack(anchor="w")
-        note = "Imou / Dahua" if cam["imou"] else "chưa rõ hãng"
+        note = cam.get("server") or ("Imou / Dahua" if cam["imou"] else "chưa rõ hãng")
         ctk.CTkLabel(left, text=f"{cam['mac'] or 'không đọc được MAC'}  ·  {note}", font=font(11),
-                     text_color=C["muted"], height=16).pack(anchor="w")
+                     text_color=C["in_text"] if cam["imou"] else C["muted"], height=16).pack(anchor="w")
 
-        right = ctk.CTkFrame(self, fg_color="transparent")
+        right = ctk.CTkFrame(top, fg_color="transparent")
         right.pack(side="right", padx=(10, 16), pady=12)
         self.entry = entry(right, width=150, height=36, show="•", placeholder_text="Safety Code")
         if code:
@@ -211,7 +214,7 @@ class _CameraRow(ctk.CTkFrame):
         ctk.CTkLabel(right, text="Mã:", font=font(12), text_color=C["muted"]).pack(side="right", padx=(0, 6))
 
         self.buttons = {}
-        middle = ctk.CTkFrame(self, fg_color="transparent")
+        middle = ctk.CTkFrame(top, fg_color="transparent")
         middle.pack(side="left", pady=12)
         for value, label in (*GATES.items(), (None, NONE_TEXT)):
             btn = ctk.CTkButton(middle, text=label, width=96, height=32, corner_radius=8,
@@ -220,7 +223,9 @@ class _CameraRow(ctk.CTkFrame):
             btn.pack(side="left", padx=3)
             self.buttons[value] = btn
 
-        self.note = ctk.CTkLabel(self, text="", font=font(12, True), text_color=C["muted"])
+        # thông báo để riêng một hàng, nếu nằm ngang thì câu dài sẽ kéo giãn cả cửa sổ
+        self.note = ctk.CTkLabel(self, text="", font=font(12, True), text_color=C["muted"],
+                                 anchor="w", justify="left", wraplength=620)
         self._render()
 
     def set_gate(self, gate, tell=False):
@@ -245,5 +250,5 @@ class _CameraRow(ctk.CTkFrame):
         self.entry.focus_set()
 
     def mark(self, text, color):
-        self.note.configure(text=f"   {text}", text_color=color)
-        self.note.pack(side="left", padx=(10, 0))
+        self.note.configure(text=text, text_color=color)
+        self.note.pack(fill="x", padx=16, pady=(0, 12))
