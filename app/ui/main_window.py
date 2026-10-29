@@ -22,6 +22,7 @@ from ..core.pricing import calc_fee, money
 from ..core.settings import check_password, load_settings, save_settings
 from ..core.storage import Storage, parse_time, record_duration, short_time, vn_time
 from ..paths import CONFIG_FILE, DATA_DIR
+from .camera_setup import CameraSetupDialog
 from .card_dialog import CardDialog
 from .password_dialog import PasswordDialog
 from .records_window import RecordsWindow, RecordView
@@ -31,6 +32,7 @@ from .theme import (C, WEEKDAYS, ImageBox, apply_ui_scale, bgr_to_pil, brand_ico
                     logo_image, make_tree, pill, primary_button, scale_applied, secondary_button,
                     style_treeview, ui_scale, zebra)
 
+AUTO_CAMERA_SETUP = True       # chưa cấu hình camera thì tự mở cửa sổ tìm camera (tắt khi chạy thử)
 KEY_COOLDOWN = 0.6             # giây, chống lặp khi giữ phím
 CLEANUP_INTERVAL = 3600 * 1000  # dọn ảnh cũ mỗi giờ (mili giây)
 
@@ -125,6 +127,8 @@ class MainWindow(ctk.CTk):
         self._tick_cameras()
         self.after(3000, self._auto_cleanup)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        if AUTO_CAMERA_SETUP and not any(camera_source(cam) for cam in self.settings["cameras"].values()):
+            self.after(900, self.open_camera_setup)  # lần đầu chạy: tự tìm camera luôn
 
     # ================= Giao diện =================
     def _size_window(self):
@@ -411,7 +415,18 @@ class MainWindow(ctk.CTk):
             return
         self.settings_win = SettingsWindow(self, self.settings, self.apply_settings, self.cleanup_photos,
                                            self.storage.image_dir, lambda: self.open_reset(authorized=True),
-                                           self.change_password)
+                                           self.change_password, self.open_camera_setup)
+
+    # ================= Tự tìm camera =================
+    def open_camera_setup(self):
+        if self._busy():
+            return
+        self.dialog = CameraSetupDialog(self, self.settings["cameras"], self._save_cameras)
+
+    def _save_cameras(self, cameras):
+        new = dict(self.settings)
+        new["cameras"] = cameras
+        self.apply_settings(new)
 
     def change_password(self, pass_hash):
         self.settings["pass_hash"] = pass_hash

@@ -25,9 +25,10 @@ class SettingsWindow(ctk.CTkToplevel):
     on_cleanup : hàm nhận số ngày giữ ảnh, dọn ảnh cũ ngay và trả về số ảnh đã xóa
     on_reset   : hàm mở hộp xác nhận reset dữ liệu
     on_password: hàm nhận mã băm mật khẩu mới, lưu ngay (không cần bấm Lưu cài đặt)
+    on_discover: hàm mở cửa sổ tự tìm camera trong mạng
     """
 
-    def __init__(self, master, settings, on_save, on_cleanup, image_dir, on_reset, on_password):
+    def __init__(self, master, settings, on_save, on_cleanup, image_dir, on_reset, on_password, on_discover):
         super().__init__(master, fg_color=C["bg"])
         self.withdraw()  # ẩn cho đến khi đặt đúng giữa màn hình
         self.settings = copy.deepcopy(settings)
@@ -35,6 +36,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.on_cleanup = on_cleanup
         self.on_reset = on_reset
         self.on_password = on_password
+        self.on_discover = on_discover
         self._scale_at_open = self.settings["scale"]
         self.image_dir = image_dir
         self.capturing = None     # (chức năng, vị trí) đang chờ nhấn phím
@@ -208,10 +210,12 @@ class SettingsWindow(ctk.CTkToplevel):
             stream.pack(anchor="w", padx=18, pady=(2, 18))
             fields["luong"] = stream
             self.cam_fields[section] = fields
-        ctk.CTkLabel(tab, text="Để trống IP và địa chỉ RTSP → chạy chế độ thử.   Nhập 0 vào ô RTSP → dùng webcam máy tính.\n"
-                               "Camera sẽ được kết nối lại ngay khi bấm Lưu cài đặt.",
-                     font=font(12), text_color=C["muted"], justify="left").grid(
-            row=1, column=0, columnspan=2, sticky="w", padx=10, pady=12)
+        bottom = ctk.CTkFrame(tab, fg_color="transparent")
+        bottom.grid(row=1, column=0, columnspan=2, sticky="ew", padx=8, pady=12)
+        primary_button(bottom, "⌕   Tự tìm camera trong mạng", self._discover, width=250, height=42).pack(side="left")
+        ctk.CTkLabel(bottom, text="Không biết IP thì bấm nút này: máy sẽ tự dò camera, bạn chỉ cần nhập Safety Code.\n"
+                                  "Để trống IP và RTSP → chạy chế độ thử.   Nhập 0 vào ô RTSP → dùng webcam máy tính.",
+                     font=font(12), text_color=C["muted"], justify="left").pack(side="left", padx=14)
 
     # ================= Giá gửi xe =================
     def _build_prices(self, tab):
@@ -357,6 +361,11 @@ class SettingsWindow(ctk.CTkToplevel):
                      font=font(12), text_color=C["text2"], height=20).pack(anchor="w")
         primary_button(danger, "Reset dữ liệu...", self._reset_data, color=C["danger"], hover=C["danger_hover"],
                        width=160, height=40).pack(side="right", padx=20)
+
+    def _discover(self):
+        """Đóng Cài đặt rồi mở cửa sổ tự tìm camera của cửa sổ chính."""
+        self.close()
+        self.master.after(120, self.on_discover)
 
     def _reset_data(self):
         """Đóng Cài đặt rồi mở hộp xác nhận reset của cửa sổ chính."""
