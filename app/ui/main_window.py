@@ -28,8 +28,8 @@ from .records_window import RecordsWindow, RecordView
 from .reset_dialog import ResetDialog
 from .settings_window import SettingsWindow
 from .theme import (C, WEEKDAYS, ImageBox, apply_ui_scale, bgr_to_pil, brand_icon, card, font, keycap,
-                    logo_image, make_tree, pill, primary_button, secondary_button, style_treeview,
-                    ui_scale, zebra)
+                    logo_image, make_tree, pill, primary_button, scale_applied, secondary_button,
+                    style_treeview, ui_scale, zebra)
 
 KEY_COOLDOWN = 0.6             # giây, chống lặp khi giữ phím
 CLEANUP_INTERVAL = 3600 * 1000  # dọn ảnh cũ mỗi giờ (mili giây)
@@ -91,7 +91,8 @@ class MainWindow(ctk.CTk):
     def __init__(self):
         super().__init__(fg_color=C["bg"])
         self.settings = load_settings(CONFIG_FILE)
-        apply_ui_scale(self, self.settings["scale"])  # phải đặt trước khi dựng giao diện
+        if not scale_applied():  # main() đã đặt sẵn; nhánh này cho lúc chạy thử
+            apply_ui_scale(self, self.settings["scale"])
         self.title(f"{APP_NAME} — {COMPANY}  v{VERSION}")
         brand_icon(self)
         self.report_callback_exception = self._on_error
@@ -135,7 +136,7 @@ class MainWindow(ctk.CTk):
         self.geometry(f"{int(sw * 0.88 / scale)}x{int(sh * 0.84 / scale)}")
         self.after(60, self._maximize)
 
-    def _maximize(self, tries=8):
+    def _maximize(self, tries=25):
         """state('zoomed') có lúc chưa ăn vì cửa sổ chưa hiện xong, nên thử lại vài lần."""
         try:
             self.state("zoomed")
@@ -538,6 +539,13 @@ class MainWindow(ctk.CTk):
 def main():
     ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
+    # đo màn hình và đặt cỡ giao diện trên một cửa sổ tạm, trước khi dựng cửa sổ chính
+    probe = tk.Tk()
+    probe.withdraw()
+    try:
+        apply_ui_scale(probe, load_settings(CONFIG_FILE)["scale"])
+    finally:
+        probe.destroy()
     MainWindow().mainloop()
 
 

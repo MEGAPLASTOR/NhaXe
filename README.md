@@ -8,6 +8,7 @@ Phần mềm ghi nhận xe vào / ra bằng 2 camera Imou (cổng vào, cổng r
 |---|---|
 | `run.bat` | Nhấp đúp để chạy. Lần đầu tự cài Python và thư viện (cần Internet). |
 | `tao_shortcut.bat` | Tạo biểu tượng **Quan ly nha xe** (logo VIDATEX) ngoài Desktop, mở không hiện cửa sổ đen. Chạy `run.bat` ít nhất 1 lần trước. |
+| `tim_camera.bat` | Dò các camera trong mạng và in ra địa chỉ IP, dùng khi chưa biết IP camera để nhập vào Cài đặt. |
 
 ### Chép sang máy khác
 Chép cả thư mục `NhaXe` rồi chạy `run.bat`. Máy chưa có Python thì nó tự tải và cài (cần Internet, khoảng 26 MB).

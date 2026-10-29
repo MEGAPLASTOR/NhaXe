@@ -57,6 +57,7 @@ DESIGN_SIZE = (1366, 768)   # giao diện được vẽ cho màn hình cỡ này
 SCALE_CHOICES = {"auto": "Tự động theo màn hình", "100": "Nhỏ (100%)", "115": "Vừa (115%)",
                  "130": "Lớn (130%)", "150": "Rất lớn (150%)"}
 _extra_scale = 1.0          # hệ số phóng thêm do màn hình lớn / người dùng chọn
+_scale_applied = False
 
 
 def dpi_scale(widget):
@@ -78,12 +79,21 @@ def auto_scale(win):
 
 
 def apply_ui_scale(win, choice):
-    """Đặt cỡ giao diện. Phải gọi trước khi dựng các thành phần. Trả về hệ số đang dùng."""
-    global _extra_scale
+    """
+    Đặt cỡ giao diện. Trả về hệ số đang dùng.
+    Nên gọi trên một cửa sổ tạm TRƯỚC khi tạo cửa sổ chính: CustomTkinter khóa kích thước
+    cửa sổ 1 giây mỗi lần đổi hệ số, gọi sau sẽ làm cửa sổ chính không phóng to được.
+    """
+    global _extra_scale, _scale_applied
     _extra_scale = auto_scale(win) if choice == "auto" else int(choice) / 100
     ctk.set_widget_scaling(_extra_scale)
     ctk.set_window_scaling(_extra_scale)
+    _scale_applied = True
     return _extra_scale
+
+
+def scale_applied():
+    return _scale_applied
 
 
 def screen_limit(win, w_ratio=0.96, h_ratio=0.88):
