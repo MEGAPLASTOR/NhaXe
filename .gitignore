@@ -1,0 +1,8 @@
+# file sinh ra khi đóng gói
+ban_phat_hanh/
+cong_cu/build/
+cong_cu/build_*.log
+# giọng đọc Piper (~100 MB) - cách tải xem README, mục Giọng nói
+giong_doc/
+# câu đọc đã tạo sẵn, máy nào tự tạo máy đó
+data/am_thanh/

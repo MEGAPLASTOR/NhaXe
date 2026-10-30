@@ -17,7 +17,7 @@ import cv2
 from PIL import Image
 
 TIME_FMT = "%Y-%m-%d %H:%M:%S"
-CARD_PATTERN = re.compile(r"^[A-Z0-9_-]{1,20}$")
+CARD_PATTERN = re.compile(r"^[0-9]{1,20}$")  # thẻ giữ xe chỉ đánh số, không có chữ
 # Tên ảnh kiểu cũ: <SốThẻ>_<năm-tháng-ngày>_<giờ-phút-giây>_<IN|OUT...>
 OLD_PHOTO_NAME = re.compile(r"^(?P<card>.+)_(?P<y>\d{4})-(?P<mo>\d{2})-(?P<d>\d{2})"
                             r"_(?P<h>\d{2})-(?P<mi>\d{2})-(?P<s>\d{2})_(?P<rest>(IN|OUT).*)$")

@@ -6,6 +6,7 @@ import hashlib
 
 from .keys import DEFAULT_KEYS
 from .pricing import DEFAULT_FRAMES, FRAME_COUNT, parse_hm
+from .speech import DEFAULT_SAY_IN, DEFAULT_SAY_OUT
 
 CAMERA_SECTIONS = ("camera_vao", "camera_ra")
 CAMERA_FIELDS = ("ip", "tai_khoan", "mat_khau", "luong", "url")
@@ -34,6 +35,9 @@ HEADER = """\
 ; [gia_ve]     : 2 khung giờ tính tiền (giờ dạng HH:MM, giá tính bằng đồng); gửi qua nhiều khung thì cộng dồn
 ; [bao_mat]    : mật khẩu mở Cài đặt (đã mã hóa) - đổi trong Cài đặt, xóa dòng này = về mật khẩu mặc định
 ; [giao_dien]  : co_giao_dien = auto (tự theo màn hình) hoặc 100 / 115 / 130 / 150 (phần trăm)
+; [giong_noi]  : bat = 1 / 0 (bật / tắt đọc), giong = tên giọng Windows (trống = tự chọn Tiếng Việt),
+;               am_luong = 0..100, loi_vao / loi_ra = câu đọc khi xe vào / ra,
+;               trong câu dùng được {tien} (tiền gửi), {the} (số thẻ), {thoi_gian} (thời gian đã gửi)
 """
 
 
@@ -82,8 +86,24 @@ def load_settings(path):
     scale = cfg.get("giao_dien", "co_giao_dien", fallback=DEFAULT_SCALE).strip()
     if scale not in SCALE_VALUES:
         scale = DEFAULT_SCALE
+    try:
+        volume = max(0, min(100, int(cfg.get("giong_noi", "am_luong", fallback="100"))))
+    except ValueError:
+        volume = 100
+    voice = {
+        "on": cfg.get("giong_noi", "bat", fallback="1").strip() != "0",
+        "name": cfg.get("giong_noi", "giong", fallback="").strip(),
+        "volume": volume,
+        "say_in": cfg.get("giong_noi", "loi_vao", fallback=DEFAULT_SAY_IN).strip(),
+        "say_out": cfg.get("giong_noi", "loi_ra", fallback=DEFAULT_SAY_OUT).strip(),
+    }
     return {"keys": keys, "cameras": cameras, "keep_days": keep_days, "prices": prices,
-            "pass_hash": pass_hash, "scale": scale}
+            "pass_hash": pass_hash, "scale": scale, "voice": voice}
+
+
+def _one_line(text):
+    """Lời đọc ghi trên 1 dòng; ; và # bị config.ini hiểu là ghi chú nên đổi thành dấu phẩy."""
+    return " ".join(text.replace(";", ",").replace("#", ",").split())
 
 
 def save_settings(path, settings):
@@ -107,6 +127,14 @@ def save_settings(path, settings):
     lines.append("")
     lines.append("[giao_dien]")
     lines.append(f"co_giao_dien = {settings['scale']}")
+    lines.append("")
+    voice = settings["voice"]
+    lines.append("[giong_noi]")
+    lines.append(f"bat = {1 if voice['on'] else 0}")
+    lines.append(f"giong = {voice['name']}")
+    lines.append(f"am_luong = {voice['volume']}")
+    lines.append(f"loi_vao = {_one_line(voice['say_in'])}")
+    lines.append(f"loi_ra = {_one_line(voice['say_out'])}")
     lines.append("")
     lines.append("[bao_mat]")
     lines.append(f"mat_khau_cai_dat = {settings['pass_hash']}")

@@ -1,6 +1,8 @@
-"""Cửa sổ Cài đặt: phím tắt, camera, giá gửi xe, thời gian lưu ảnh, đổi mật khẩu."""
+"""Cửa sổ Cài đặt: phím tắt, camera, giá gửi xe, giọng nói, thời gian lưu ảnh, đổi mật khẩu."""
 
 import copy
+import os
+import threading
 import tkinter as tk
 from datetime import datetime, timedelta
 
@@ -10,11 +12,21 @@ from ..core.keys import (ACTION_TITLES, ACTIONS, COMBO_MODIFIERS, DEFAULT_KEYS, 
                          key_name, keys_text)
 from ..core.pricing import fee_detail, detail_text, money, parse_hm, parse_money
 from ..core.settings import check_password, hash_password
+from ..core.speech import (AUTO_VOICE, DEFAULT_SAY_IN, DEFAULT_SAY_OUT, INSTALL_DENIED, INSTALL_MISSING, INSTALL_OK,
+                           PLACEHOLDERS, WIN_PREFIX, fill, install_vietnamese_voice)
 from .password_dialog import ChangePasswordDialog
 from .theme import (C, SCALE_CHOICES, auto_scale, card, entry, font, open_file, pill, primary_button,
                    secondary_button, segmented, brand_icon, show_centered, tabview)
 
 STREAMS = {"0": "Nét (luồng chính)", "1": "Mượt (luồng phụ)"}
+AUTO_VOICE_LABEL = "Tự động (có mạng: Edge, mất mạng: Piper)"
+SAMPLE = {"card": "12", "fee": 10000, "duration": "2 giờ 15 phút"}  # dữ liệu mẫu cho nút Nghe thử
+INSTALL_NOTES = {  # cài giọng xong mà vẫn chưa có giọng Tiếng Việt -> lý do
+    INSTALL_DENIED: "Chưa cài được: bạn đã bấm Không khi Windows hỏi quyền. Bấm cài lại và chọn Có (Yes).",
+    INSTALL_MISSING: "Windows trên máy này không có gói giọng Tiếng Việt để tải. Thử cài bằng tay.",
+    INSTALL_OK: "Đã cài xong nhưng chưa thấy giọng mới — mở lại chương trình hoặc khởi động lại máy.",
+}
+INSTALL_FAILED_NOTE = "Không tải được gói giọng (cần mạng Internet). Kiểm tra mạng rồi bấm cài lại, hoặc cài bằng tay."
 SIZE = (940, 700)
 
 
@@ -26,9 +38,11 @@ class SettingsWindow(ctk.CTkToplevel):
     on_reset   : hàm mở hộp xác nhận reset dữ liệu
     on_password: hàm nhận mã băm mật khẩu mới, lưu ngay (không cần bấm Lưu cài đặt)
     on_discover: hàm mở cửa sổ tự tìm camera trong mạng
+    speaker    : bộ đọc giọng nói (dùng cho danh sách giọng và nút Nghe thử)
     """
 
-    def __init__(self, master, settings, on_save, on_cleanup, image_dir, on_reset, on_password, on_discover):
+    def __init__(self, master, settings, on_save, on_cleanup, image_dir, on_reset, on_password, on_discover,
+                 speaker):
         super().__init__(master, fg_color=C["bg"])
         self.withdraw()  # ẩn cho đến khi đặt đúng giữa màn hình
         self.settings = copy.deepcopy(settings)
@@ -37,6 +51,10 @@ class SettingsWindow(ctk.CTkToplevel):
         self.on_reset = on_reset
         self.on_password = on_password
         self.on_discover = on_discover
+        self.speaker = speaker
+        self._voice_keys = {AUTO_VOICE_LABEL: AUTO_VOICE}  # tên trong danh sách -> mã giọng lưu vào cài đặt
+        self._installing = False     # đang tải / cài giọng Tiếng Việt
+        self._install_result = None  # mã kết quả luồng cài giọng gửi về
         self._scale_at_open = self.settings["scale"]
         self.image_dir = image_dir
         self.capturing = None     # (chức năng, vị trí) đang chờ nhấn phím
@@ -52,7 +70,7 @@ class SettingsWindow(ctk.CTkToplevel):
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=22, pady=(18, 0))
         ctk.CTkLabel(head, text="⚙  Cài đặt", font=font(22, True), text_color=C["text"]).pack(side="left")
-        ctk.CTkLabel(head, text="Phím tắt, camera, giá gửi xe và thời gian lưu ảnh", font=font(12),
+        ctk.CTkLabel(head, text="Phím tắt, camera, giá gửi xe, giọng nói và thời gian lưu ảnh", font=font(12),
                      text_color=C["muted"]).pack(side="left", padx=14, pady=(6, 0))
 
         self.tabs = tabview(self)
@@ -60,6 +78,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self._build_keys(self.tabs.add("Phím tắt"))
         self._build_cameras(self.tabs.add("Camera"))
         self._build_prices(self.tabs.add("Giá gửi xe"))
+        self._build_voice(self.tabs.add("Giọng nói"))
         self._build_storage(self.tabs.add("Lưu trữ ảnh"))
         self._build_display(self.tabs.add("Giao diện"))
 
@@ -154,7 +173,8 @@ class SettingsWindow(ctk.CTkToplevel):
         self.capturing = None
         keys = self.settings["keys"][action]
         if key in RESERVED:
-            self.key_note.configure(text="Esc được dành để hủy, không gán được", text_color=C["warn"])
+            self.key_note.configure(text=f"{key_name(key)} đã được dành riêng, không gán được",
+                                    text_color=C["warn"])
         elif key in ("BackSpace", "Delete"):
             if slot < len(keys):
                 keys.pop(slot)
@@ -325,6 +345,169 @@ class SettingsWindow(ctk.CTkToplevel):
         self.fee_total.configure(text=money(total))
         self.fee_detail.configure(text=detail_text(items), text_color=C["text2"])
 
+    # ================= Giọng nói =================
+    def _build_voice(self, tab):
+        voice = self.settings["voice"]
+        box = card(tab)
+        box.pack(fill="x", padx=10, pady=(10, 0))
+        row = ctk.CTkFrame(box, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=(16, 8))
+        self.voice_on = ctk.CTkSwitch(row, text="Đọc lời chào khi xe vào / ra", font=font(15, True),
+                                      text_color=C["text"], progress_color=C["accent"])
+        self.voice_on.select() if voice["on"] else self.voice_on.deselect()
+        self.voice_on.pack(side="left")
+
+        row = ctk.CTkFrame(box, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=4)
+        ctk.CTkLabel(row, text="Giọng đọc", font=font(13), text_color=C["text2"], width=90, anchor="w").pack(
+            side="left")
+        self.voice_menu = ctk.CTkOptionMenu(row, values=[AUTO_VOICE_LABEL], width=380, height=34, corner_radius=10,
+                                            font=font(13), dropdown_font=font(13), fg_color=C["surface2"],
+                                            button_color=C["accent"], button_hover_color=C["accent_hover"],
+                                            text_color=C["text"])
+        self.voice_menu.pack(side="left", padx=(0, 20))
+        ctk.CTkLabel(row, text="Âm lượng", font=font(13), text_color=C["text2"]).pack(side="left")
+        self.volume = ctk.CTkSlider(row, from_=0, to=100, number_of_steps=20, width=160,
+                                    button_color=C["accent"], progress_color=C["accent"],
+                                    command=lambda v: self.volume_label.configure(text=f"{int(v)}%"))
+        self.volume.set(voice["volume"])
+        self.volume.pack(side="left", padx=8)
+        self.volume_label = ctk.CTkLabel(row, text=f"{voice['volume']}%", font=font(13, True),
+                                         text_color=C["text2"], width=44)
+        self.volume_label.pack(side="left")
+
+        self.voice_state = ctk.CTkFrame(box, fg_color="transparent")
+        self.voice_state.pack(fill="x", padx=20, pady=(8, 16))
+        self._fill_voices(voice["name"])
+
+        box = card(tab)
+        box.pack(fill="x", padx=10, pady=(12, 0))
+        self.say_fields = {}
+        for key, title, color, soft in (("say_in", "●  LỜI ĐỌC KHI XE VÀO", C["in_text"], C["in_soft"]),
+                                        ("say_out", "●  LỜI ĐỌC KHI XE RA", C["out_text"], C["out_soft"])):
+            pill(box, title, color, soft, size=12).pack(anchor="w", padx=20, pady=(14 if key == "say_in" else 6, 6))
+            row = ctk.CTkFrame(box, fg_color="transparent")
+            row.pack(fill="x", padx=20, pady=(0, 6))
+            e = entry(row, height=38, font=font(15))
+            e.insert(0, voice[key])
+            e.pack(side="left", fill="x", expand=True)
+            secondary_button(row, "▶  Nghe thử", lambda k=key: self._try_voice(k), width=120, height=38).pack(
+                side="left", padx=(10, 0))
+            self.say_fields[key] = e
+        tips = "   ".join(f"{code} = {meaning}" for code, meaning in PLACEHOLDERS)
+        ctk.CTkLabel(box, text=f"Chèn vào câu:   {tips}\n"
+                               f"VD: “Phí gửi xe {{tien}}. Hẹn gặp lại” → “Phí gửi xe mười nghìn đồng. Hẹn gặp lại”",
+                     font=font(12), text_color=C["muted"], justify="left").pack(anchor="w", padx=20, pady=(4, 8))
+        bottom = ctk.CTkFrame(box, fg_color="transparent")
+        bottom.pack(fill="x", padx=20, pady=(0, 16))
+        secondary_button(bottom, "Khôi phục lời mặc định", self._reset_voice, width=190, height=34).pack(side="left")
+        self.voice_note = ctk.CTkLabel(bottom, text="", font=font(13, True), text_color=C["muted"])
+        self.voice_note.pack(side="left", padx=14)
+
+    def _fill_voices(self, chosen, install_result=None):
+        """Danh sách giọng có trên máy. Bộ đọc khởi động chưa xong thì chờ một chút rồi điền lại.
+        install_result: mã kết quả nếu vừa bấm cài giọng, để báo lý do khi vẫn chưa có giọng Tiếng Việt."""
+        if not self.winfo_exists():
+            return
+        if not self.speaker.ready.is_set():
+            self.after(300, lambda: self._fill_voices(chosen, install_result))
+            return
+        self._voice_keys = {AUTO_VOICE_LABEL: AUTO_VOICE}
+        self._voice_keys.update({label: key for key, label in self.speaker.choices()})
+        if chosen and not chosen.startswith(("edge:", "piper", WIN_PREFIX)):
+            chosen = WIN_PREFIX + chosen  # cài đặt cũ ghi tên giọng Windows trơn
+        self.voice_menu.configure(values=list(self._voice_keys))
+        self.voice_menu.set(next((label for label, key in self._voice_keys.items() if key == chosen),
+                                 AUTO_VOICE_LABEL))
+
+        for child in self.voice_state.winfo_children():
+            child.destroy()
+        vietnamese = self.speaker.vietnamese_voice()
+        if self.speaker.has_vietnamese():
+            ready = (["Edge (giọng tự nhiên, cần mạng)"] if self.speaker.edge_ok else []) + \
+                    (["Piper (không cần mạng)"] if self.speaker.piper_ok else []) + \
+                    ([f"Windows: {vietnamese}"] if vietnamese else [])
+            ctk.CTkLabel(self.voice_state, text="✓  Giọng Tiếng Việt sẵn sàng:  " + "   ·   ".join(ready),
+                         font=font(13, True), text_color=C["in_text"]).pack(side="left")
+            if install_result is not None and vietnamese:
+                self.voice_note.configure(text="Bấm ▶ Nghe thử để nghe giọng mới", text_color=C["in_text"])
+            return
+        if install_result is None:
+            text = ("⚠  Máy chưa có giọng Tiếng Việt nên chưa đọc được.\n"
+                    "Bấm nút bên phải để máy tự tải và cài (cần mạng, Windows hỏi quyền thì bấm Có).")
+        else:
+            text = "⚠  " + INSTALL_NOTES.get(install_result, INSTALL_FAILED_NOTE)
+        # nút xếp trước để luôn đủ chỗ, dòng thông báo lấy phần còn lại
+        primary_button(self.voice_state, "⬇  Cài giọng Tiếng Việt", self._install_voice,
+                       width=200, height=36).pack(side="right", padx=(10, 0))
+        if install_result is not None:
+            secondary_button(self.voice_state, "Cài bằng tay", self._open_windows_speech,
+                             width=120, height=36).pack(side="right", padx=(10, 0))
+        ctk.CTkLabel(self.voice_state, text=text, font=font(12, True), text_color=C["warn"], fg_color=C["warn_soft"],
+                     corner_radius=8, justify="left", wraplength=380).pack(side="left", ipadx=8, ipady=4)
+
+    def _install_voice(self):
+        """Tự tải gói giọng Tiếng Việt của Windows trong luồng riêng, cửa sổ vẫn dùng được trong lúc chờ."""
+        if self._installing:
+            return
+        self._installing = True
+        self._install_result = None
+        for child in self.voice_state.winfo_children():
+            child.destroy()
+        ctk.CTkLabel(self.voice_state, text="⏳  Đang tải và cài giọng Tiếng Việt, mất khoảng 1–5 phút...\n"
+                                            "Windows hỏi “Cho phép thay đổi thiết bị?” thì bấm Có (Yes).",
+                     font=font(12, True), text_color=C["accent"], fg_color=C["accent_soft"], corner_radius=8,
+                     justify="left").pack(side="left", ipadx=8, ipady=4)
+
+        def work():
+            result = install_vietnamese_voice()
+            self.speaker.restart()  # nạp lại danh sách giọng (cả màn hình chính dùng chung bộ đọc này)
+            self._install_result = result
+
+        threading.Thread(target=work, daemon=True).start()
+        self.after(500, self._wait_install)
+
+    def _wait_install(self):
+        if not self.winfo_exists():
+            return
+        if self._install_result is None:
+            self.after(500, self._wait_install)
+            return
+        self._installing = False
+        self._fill_voices(self._chosen_voice(), self._install_result)
+
+    @staticmethod
+    def _open_windows_speech():
+        try:
+            os.startfile("ms-settings:speech")
+        except OSError:
+            pass
+
+    def _chosen_voice(self):
+        return self._voice_keys.get(self.voice_menu.get(), AUTO_VOICE)
+
+    def _try_voice(self, key):
+        sample = SAMPLE if key == "say_out" else {"card": SAMPLE["card"]}  # xe vào thì chưa có tiền
+        text = fill(self.say_fields[key].get(), **sample)
+        voice = self._chosen_voice()
+        if self.speaker.say(text, voice, int(self.volume.get())):
+            if self.speaker.edge_pending(text, voice):
+                self.voice_note.configure(text="Câu mới: Piper đọc trước, giọng Edge đang tải — lát bấm lại",
+                                          text_color=C["accent"])
+            else:
+                self.voice_note.configure(text=f"Đang đọc: “{' '.join(text.split())}”", text_color=C["in_text"])
+        elif not text.strip():
+            self.voice_note.configure(text="Câu đang để trống", text_color=C["warn"])
+        else:
+            self.voice_note.configure(text="Không đọc được — máy chưa có giọng Tiếng Việt (chọn giọng khác ở trên)",
+                                      text_color=C["warn"])
+
+    def _reset_voice(self):
+        for key, default in (("say_in", DEFAULT_SAY_IN), ("say_out", DEFAULT_SAY_OUT)):
+            self.say_fields[key].delete(0, "end")
+            self.say_fields[key].insert(0, default)
+        self.voice_note.configure(text="Đã khôi phục lời mặc định", text_color=C["muted"])
+
     # ================= Lưu trữ ảnh =================
     def _build_storage(self, tab):
         box = card(tab)
@@ -460,6 +643,13 @@ class SettingsWindow(ctk.CTkToplevel):
             return
         self.settings["keep_days"] = days
         self.settings["prices"] = prices
+        self.settings["voice"] = {
+            "on": bool(self.voice_on.get()),
+            "name": self._chosen_voice(),
+            "volume": int(self.volume.get()),
+            "say_in": " ".join(self.say_fields["say_in"].get().split()),
+            "say_out": " ".join(self.say_fields["say_out"].get().split()),
+        }
         for section, fields in self.cam_fields.items():
             cam = self.settings["cameras"][section]
             for key in ("ip", "tai_khoan", "mat_khau", "url"):

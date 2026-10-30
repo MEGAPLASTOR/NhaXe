@@ -1,0 +1,28 @@
+# Thông tin hiện trong Properties -> Details của bộ cài đặt
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 1, 0, 0),
+    prodvers=(1, 1, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '000004b0',
+        [StringStruct('CompanyName', 'VIDATEX JSC'),
+         StringStruct('FileDescription', 'Bo cai dat phan mem Quan Ly Nha Xe'),
+         StringStruct('FileVersion', '1.1.0.0'),
+         StringStruct('InternalName', 'CaiDatQuanLyNhaXe'),
+         StringStruct('LegalCopyright', 'Copyright (c) VIDATEX JSC'),
+         StringStruct('OriginalFilename', 'CaiDat_QuanLyNhaXe.exe'),
+         StringStruct('ProductName', 'Quan Ly Nha Xe - Bo cai dat'),
+         StringStruct('ProductVersion', '1.1.0')])
+    ]),
+    VarFileInfo([VarStruct('Translation', [0, 1200])])
+  ]
+)

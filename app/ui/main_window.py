@@ -20,10 +20,13 @@ from ..core.errors import log_error
 from ..core.keys import ACTIONS, COMBO_MODIFIERS, event_key, keys_text
 from ..core.pricing import calc_fee, money
 from ..core.settings import check_password, load_settings, save_settings
+from ..core.speech import Speaker, fill
 from ..core.storage import Storage, parse_time, record_duration, short_time, vn_time
-from ..paths import CONFIG_FILE, DATA_DIR
+from ..paths import CONFIG_FILE, DATA_DIR, SOUND_CACHE_DIR, VOICE_DIR
 from .camera_setup import CameraSetupDialog
 from .card_dialog import CardDialog
+from .lock_screen import LockScreen
+from .modal import ModalDialog
 from .password_dialog import PasswordDialog
 from .records_window import RecordsWindow, RecordView
 from .reset_dialog import ResetDialog
@@ -33,6 +36,10 @@ from .theme import (C, WEEKDAYS, ImageBox, apply_ui_scale, bgr_to_pil, brand_ico
                     style_treeview, ui_scale, zebra)
 
 AUTO_CAMERA_SETUP = True       # chưa cấu hình camera thì tự mở cửa sổ tìm camera (tắt khi chạy thử)
+BOTTOM_SHARE = 0.42            # phần màn hình dành cho khu dưới (có 2 ô camera trực tiếp), còn lại là 2 khung ảnh
+BOTTOM_MIN, BOTTOM_MAX = 260, 430   # giới hạn chiều cao khu dưới (chưa nhân hệ số phóng)
+HEADER_FULL = 1290             # hẹp hơn mức này thì thanh trên không đủ chỗ cho 3 ô thống kê
+FULLSCREEN_KEY = "F11"         # bật / tắt toàn màn hình, không cần mật khẩu
 KEY_COOLDOWN = 0.6             # giây, chống lặp khi giữ phím
 CLEANUP_INTERVAL = 3600 * 1000  # dọn ảnh cũ mỗi giờ (mili giây)
 
@@ -47,20 +54,21 @@ STATUS_STYLE = {  # mức thông báo -> (màu chữ, màu nền)
 
 
 class CameraCard(ctk.CTkFrame):
-    """Khung camera trực tiếp của 1 cổng, kèm nút ghi nhận."""
+    """Khung lớn của 1 cổng: ảnh vừa chụp ở cổng đó (bấm để phóng to), trạng thái camera và nút ghi nhận.
+    Hình trực tiếp của camera hiện ở ô nhỏ phía dưới (trong khung Lượt vừa ghi nhận)."""
 
-    def __init__(self, master, title, color, soft, hover, action, command):
+    def __init__(self, master, title, color, soft, hover, action, command, on_zoom):
         super().__init__(master, fg_color=C["surface"], corner_radius=16, border_width=1, border_color=C["border"])
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 10))
-        pill(top, f"●  {title}", color, soft, size=13).pack(side="left")
+        pill(top, title, color, soft, size=13).pack(side="left")
         self.state_label = ctk.CTkLabel(top, text="", font=font(12, True), text_color=C["muted"])
         self.state_label.pack(side="right")
 
-        self.screen = ImageBox(self, placeholder="Đang kết nối camera...", dark=True)
+        self.screen = ImageBox(self, placeholder="Chưa có ảnh", dark=True, on_click=on_zoom)
         self.screen.grid(row=1, column=0, sticky="nsew", padx=16)
 
         bottom = ctk.CTkFrame(self, fg_color="transparent")
@@ -75,14 +83,15 @@ class CameraCard(ctk.CTkFrame):
     def set_keys(self, keys):
         self.key_cap.label.configure(text=keys_text(keys))
 
-    def update_view(self, cam):
+    def update_view(self, cam, live_box):
+        """Vẽ hình trực tiếp vào ô camera phía dưới; trạng thái kết nối hiện ở góc khung này."""
         frame = cam.latest()
         if frame is not None:
-            self.screen.show_frame(frame, live=cam.configured)
-            state = (f"●  {cam.state}", C["in_text"] if cam.configured else C["warn"])
+            live_box.show_frame(frame, live=cam.configured)
+            state = (f"●  Camera {cam.state.lower()}", C["in_text"] if cam.configured else C["warn"])
         else:
             text = cam.state if cam.state != CONNECTED else "Không nhận được hình mới..."
-            self.screen.show(None, f"MẤT TÍN HIỆU\n{text}")
+            live_box.show(None, f"MẤT TÍN HIỆU\n{text}")
             state = (f"●  {text}", C["danger"])
         if state != self._last_state:
             self.state_label.configure(text=state[0], text_color=state[1])
@@ -103,10 +112,12 @@ class MainWindow(ctk.CTk):
 
         self.storage = Storage(DATA_DIR)
         self._start_cameras()
+        self.speaker = Speaker(VOICE_DIR, SOUND_CACHE_DIR)
 
         self.dialog = None      # cửa sổ nhập số thẻ đang mở
         self.records = None     # cửa sổ tra cứu
         self.settings_win = None
+        self.lock = None        # màn hình khóa đang phủ lên (None = không khóa)
         self.key_map = {}       # phím -> chức năng
         self._last_key = None
         self._last_key_time = 0.0
@@ -125,6 +136,7 @@ class MainWindow(ctk.CTk):
         self.set_status("Sẵn sàng làm việc", "ok")
         self._tick_clock()
         self._tick_cameras()
+        self.after(2000, self._prefetch_voice)
         self.after(3000, self._auto_cleanup)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         if AUTO_CAMERA_SETUP and not any(camera_source(cam) for cam in self.settings["cameras"].values()):
@@ -138,7 +150,37 @@ class MainWindow(ctk.CTk):
         # geometry / minsize của CustomTkinter tự nhân hệ số, nên ở đây truyền cỡ chưa nhân
         self.minsize(min(1100, int((sw - 40) / scale)), min(680, int((sh - 120) / scale)))
         self.geometry(f"{int(sw * 0.88 / scale)}x{int(sh * 0.84 / scale)}")
-        self.after(60, self._maximize)
+        self.fullscreen = False
+        self.after(60, lambda: self.set_fullscreen(True))
+
+    def set_fullscreen(self, on):
+        """Toàn màn hình: không còn thanh tiêu đề, che luôn thanh tác vụ Windows."""
+        self.fullscreen = on
+        try:
+            self.attributes("-fullscreen", on)
+        except tk.TclError:
+            pass
+        if not on:
+            self._maximize()
+
+    def toggle_fullscreen(self):
+        if not self._busy():
+            self.set_fullscreen(not self.fullscreen)
+
+    # ================= Khóa màn hình =================
+    def lock_screen(self):
+        """Khóa như nút ổ khóa của Zalo: phủ kín màn hình, phải có mật khẩu mới dùng tiếp."""
+        if self._busy():
+            return
+        self.lock = LockScreen(self, lambda pw: check_password(self.settings, pw), self.unlock_screen)
+        self.set_status("Đã khóa màn hình", "warn")
+
+    def unlock_screen(self):
+        if self.lock is not None:
+            self.lock.destroy()
+            self.lock = None
+        self.focus_force()
+        self.set_status("Đã mở khóa", "ok")
 
     def _maximize(self, tries=25):
         """state('zoomed') có lúc chưa ăn vì cửa sổ chưa hiện xong, nên thử lại vài lần."""
@@ -172,8 +214,10 @@ class MainWindow(ctk.CTk):
         ctk.CTkLabel(names, text="Hệ thống ghi nhận xe vào / ra bằng camera", font=font(11),
                      text_color=C["muted"], height=16).pack(anchor="w")
 
-        stats = ctk.CTkFrame(bar, fg_color="transparent")
+        stats = self.stats_box = ctk.CTkFrame(bar, fg_color="transparent")
         stats.grid(row=0, column=1)
+        self._stats_shown = True
+        bar.bind("<Configure>", lambda e: self._fit_header(e.width))
         self.stat_labels = {}
         for key, title, color, soft in (("parked", "ĐANG GỬI", C["accent"], C["accent_soft"]),
                                         ("in", "VÀO HÔM NAY", C["in_text"], C["in_soft"]),
@@ -193,6 +237,7 @@ class MainWindow(ctk.CTk):
         self.btn_history = secondary_button(right, "", lambda: self.open_records(1), width=140)
         self.btn_history.pack(side="left", padx=4)
         secondary_button(right, "⚙  Cài đặt", self.open_settings, width=120).pack(side="left", padx=4)
+        secondary_button(right, "🔒", self.lock_screen, width=46).pack(side="left", padx=4)
         clock = ctk.CTkFrame(right, fg_color="transparent")
         clock.pack(side="left", padx=(20, 0))
         self.clock_time = ctk.CTkLabel(clock, text="", font=font(24, True), text_color=C["text"], height=30)
@@ -204,24 +249,30 @@ class MainWindow(ctk.CTk):
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.grid(row=1, column=0, sticky="nsew", padx=18, pady=14)
         body.grid_columnconfigure((0, 1), weight=1, uniform="cam")
-        body.grid_rowconfigure(0, weight=1)  # camera chiếm phần lớn màn hình
+        body.grid_rowconfigure(0, weight=1)  # 2 khung ảnh vừa chụp chiếm phần lớn màn hình
         body.grid_rowconfigure(1, weight=0)
 
-        self.view_in = CameraCard(body, "CỔNG VÀO", C["in"], C["in_soft"], C["in_hover"],
-                                  "Ghi nhận xe vào", self.start_entry)
+        # 2 khung lớn phía trên: ảnh vừa chụp lúc vào / lúc ra (bấm để phóng to)
+        self.view_in = CameraCard(body, "↓  ẢNH LÚC VÀO", C["in"], C["in_soft"], C["in_hover"],
+                                  "Ghi nhận xe vào", self.start_entry, lambda: self.last_view._zoom("anh_vao"))
         self.view_in.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 8))
-        self.view_out = CameraCard(body, "CỔNG RA", C["out"], C["out_soft"], C["out_hover"],
-                                   "Ghi nhận xe ra", self.start_exit)
+        self.view_out = CameraCard(body, "↑  ẢNH LÚC RA", C["out"], C["out_soft"], C["out_hover"],
+                                   "Ghi nhận xe ra", self.start_exit, lambda: self.last_view._zoom("anh_ra"))
         self.view_out.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 8))
 
         bottom = ctk.CTkFrame(body, fg_color="transparent")
         bottom.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
+        # giữ khu dưới ở một chiều cao vừa phải, bao nhiêu còn lại dồn hết cho 2 khung ảnh
+        bottom.grid_propagate(False)
+        body.bind("<Configure>", lambda e: self._share_height(bottom, e.height))
         bottom.grid_columnconfigure(0, weight=3)
         bottom.grid_columnconfigure(1, weight=1)
         bottom.grid_rowconfigure(0, weight=1)
 
+        # khung dưới: thông tin lượt vừa ghi nhận + 2 ô camera trực tiếp cổng vào / cổng ra
         self.last_view = RecordView(bottom, self.storage, "Lượt vừa ghi nhận", on_undo=self.undo_exit,
-                                    fee_of=self.fee_of)
+                                    fee_of=self.fee_of, on_exit=self.start_exit,
+                                    photo_boxes=(self.view_in.screen, self.view_out.screen))
         self.last_view.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
         recent = card(bottom)
@@ -237,6 +288,19 @@ class MainWindow(ctk.CTk):
         ], rows=6)
         holder.pack(fill="both", expand=True, padx=14, pady=(0, 14))
         self.recent_tree.bind("<<TreeviewSelect>>", self._on_recent_select)
+
+    def _fit_header(self, bar_width):
+        """Cửa sổ hẹp thì giấu 3 ô thống kê đi, nếu không chúng bị bóp dẹp và không đọc được."""
+        du_cho = bar_width >= HEADER_FULL * ui_scale(self)
+        if du_cho == self._stats_shown:
+            return
+        self._stats_shown = du_cho
+        self.stats_box.grid() if du_cho else self.stats_box.grid_remove()
+
+    def _share_height(self, bottom, body_height):
+        # configure(height=...) của CustomTkinter tự nhân hệ số phóng, nên tính bằng cỡ chưa nhân
+        logical = body_height / ui_scale(self)
+        bottom.configure(height=min(BOTTOM_MAX, max(BOTTOM_MIN, int(logical * BOTTOM_SHARE))))
 
     def _build_footer(self):
         bar = ctk.CTkFrame(self, fg_color=C["surface"], corner_radius=0)
@@ -266,7 +330,11 @@ class MainWindow(ctk.CTk):
                 ctk.CTkLabel(self.key_hints, text=title, font=font(12), text_color=C["muted"]).pack(
                     side="left", padx=(6, 20))
         keycap(self.key_hints, "Esc").pack(side="left")
-        ctk.CTkLabel(self.key_hints, text="Hủy / đóng", font=font(12), text_color=C["muted"]).pack(side="left", padx=6)
+        ctk.CTkLabel(self.key_hints, text="Hủy / đóng", font=font(12),
+                     text_color=C["muted"]).pack(side="left", padx=(6, 20))
+        keycap(self.key_hints, FULLSCREEN_KEY).pack(side="left")
+        ctk.CTkLabel(self.key_hints, text="Toàn màn hình / thu nhỏ", font=font(12),
+                     text_color=C["muted"]).pack(side="left", padx=6)
 
     def _on_key(self, event):
         key = event_key(event)
@@ -283,7 +351,7 @@ class MainWindow(ctk.CTk):
             self._run_key(key)
 
     def _run_key(self, key):
-        action = self.key_map.get(key)
+        action = "fullscreen" if key == FULLSCREEN_KEY else self.key_map.get(key)
         if action is None:
             return None
         now = time.monotonic()
@@ -301,10 +369,14 @@ class MainWindow(ctk.CTk):
             self.open_records(1)
         elif action == "reset":
             self.open_reset()
+        elif action == "fullscreen":
+            self.toggle_fullscreen()
         return "break"
 
     def _busy(self):
-        return any(w is not None and w.winfo_exists() for w in (self.dialog, self.settings_win))
+        """Đang khóa màn hình hoặc có hộp thoại nào mở thì không nhận phím tắt nữa."""
+        return (self.lock is not None or ModalDialog.any_open()
+                or (self.settings_win is not None and self.settings_win.winfo_exists()))
 
     # ================= Nghiệp vụ =================
     def start_entry(self):
@@ -314,13 +386,14 @@ class MainWindow(ctk.CTk):
         photo = bgr_to_pil(frame) if frame is not None else None
         self.dialog = CardDialog(self, "IN", photo, when, lambda card_no: self._commit_in(card_no, frame, when))
 
-    def start_exit(self):
+    def start_exit(self, card=""):
+        """card khác rỗng: mở sẵn với số thẻ đó (bấm nút "Cho xe này ra")."""
         if self._busy():
             return
         frame, when = self._snapshot(self.cam_out, "ra")
         photo = bgr_to_pil(frame) if frame is not None else None
         self.dialog = CardDialog(self, "OUT", photo, when, lambda card_no: self._commit_out(card_no, frame, when),
-                                 preview=lambda card_no: self._exit_preview(card_no, when))
+                                 preview=lambda card_no: self._exit_preview(card_no, when), card=card)
 
     def _snapshot(self, cam, gate):
         """Chụp ảnh ngay lúc bấm phím."""
@@ -341,6 +414,7 @@ class MainWindow(ctk.CTk):
         self.last_view.show(rid, "Lượt vừa ghi nhận")
         self.refresh_data()
         self.set_status(f"XE VÀO  ·  thẻ {card_no}  ·  {when:%H:%M:%S}", "in")
+        self.speak(self.settings["voice"]["say_in"], card_no)
         return None
 
     def fee_of(self, rec):
@@ -368,9 +442,26 @@ class MainWindow(ctk.CTk):
         self.last_view.undo_id = rec["id"]
         self.last_view.show(rec["id"], "Lượt vừa ghi nhận")
         self.refresh_data()
-        self.set_status(f"XE RA  ·  thẻ {card_no}  ·  đã gửi {record_duration(self.storage.get(rec['id']))}"
-                        f"  ·  THU {money(fee)}", "out")
+        duration = record_duration(self.storage.get(rec["id"]))
+        self.set_status(f"XE RA  ·  thẻ {card_no}  ·  đã gửi {duration}  ·  THU {money(fee)}", "out")
+        self.speak(self.settings["voice"]["say_out"], card_no, fee, duration)
         return None
+
+    def _prefetch_voice(self):
+        """Tạo sẵn (chạy ngầm) câu chào xe vào và câu báo các mức tiền hay gặp, để lúc xe ra là đọc được ngay."""
+        voice = self.settings["voice"]
+        if not voice["on"]:
+            return
+        prices = [frame["gia"] for frame in self.settings["prices"]]
+        fees = {*prices, sum(prices), *(sum(prices) + p for p in prices), 2 * sum(prices)}
+        texts = [fill(voice["say_in"])] + [fill(voice["say_out"], fee=fee) for fee in sorted(fees)]
+        self.speaker.prefetch(texts, voice["name"])
+
+    def speak(self, template, card_no="", fee=None, duration=""):
+        """Đọc lời chào / báo tiền theo câu cài đặt trong tab Giọng nói."""
+        voice = self.settings["voice"]
+        if voice["on"]:
+            self.speaker.say(fill(template, card_no, fee, duration), voice["name"], voice["volume"])
 
     def undo_exit(self, rid):
         rec = self.storage.get(rid)
@@ -399,7 +490,7 @@ class MainWindow(ctk.CTk):
             self.records.lift()
             self.records.focus_force()
         else:
-            self.records = RecordsWindow(self, self.storage, tab, self.fee_of)
+            self.records = RecordsWindow(self, self.storage, tab, self.fee_of, on_exit=self.start_exit)
 
     # ================= Cài đặt =================
     def _ask_password(self, purpose, on_success):
@@ -415,7 +506,7 @@ class MainWindow(ctk.CTk):
             return
         self.settings_win = SettingsWindow(self, self.settings, self.apply_settings, self.cleanup_photos,
                                            self.storage.image_dir, lambda: self.open_reset(authorized=True),
-                                           self.change_password, self.open_camera_setup)
+                                           self.change_password, self.open_camera_setup, self.speaker)
 
     # ================= Tự tìm camera =================
     def open_camera_setup(self):
@@ -476,6 +567,8 @@ class MainWindow(ctk.CTk):
         if new["prices"] != old["prices"]:
             self.refresh_data()  # tiền tạm tính của xe đang gửi theo bảng giá mới
             self.last_view.refresh()
+        if new["voice"] != old["voice"] or new["prices"] != old["prices"]:
+            self._prefetch_voice()
         if new["scale"] != old["scale"]:
             self.set_status("Đã lưu cài đặt — mở lại chương trình để áp dụng cỡ giao diện mới", "warn")
             return
@@ -534,11 +627,13 @@ class MainWindow(ctk.CTk):
         self.after(1000, self._tick_clock)
 
     def _tick_cameras(self):
-        self.view_in.update_view(self.cam_in)
-        self.view_out.update_view(self.cam_out)
+        self.view_in.update_view(self.cam_in, self.last_view.live_in)
+        self.view_out.update_view(self.cam_out, self.last_view.live_out)
         self.after(40, self._tick_cameras)
 
     def _on_error(self, exc_type, exc, tb):
+        if issubclass(exc_type, tk.TclError) and "bad window path name" in str(exc):
+            return  # hộp thoại vừa đóng, CustomTkinter dọn muộn — không ảnh hưởng gì
         log_error(exc_type, exc, tb)
         try:
             self.set_status("Có lỗi xảy ra — chi tiết trong data/loi.log", "error")
@@ -546,6 +641,7 @@ class MainWindow(ctk.CTk):
             pass
 
     def on_close(self):
+        self.speaker.stop()
         self.cam_in.stop()
         self.cam_out.stop()
         self.destroy()

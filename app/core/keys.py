@@ -13,7 +13,7 @@ ACTION_TITLES = dict(ACTIONS)
 DEFAULT_KEYS = {"in": ["Shift_L"], "out": ["Return", "Shift_R"], "parked": ["F3"], "history": ["F4"],
                 "reset": ["Control+Delete"]}
 MAX_KEYS = 2                 # mỗi chức năng tối đa 2 phím
-RESERVED = {"Escape"}        # Esc luôn dùng để hủy / đóng
+RESERVED = {"Escape", "F11"}  # Esc để hủy, F11 để thoát toàn màn hình        # Esc luôn dùng để hủy / đóng
 COMBO_MODIFIERS = {"Control_L", "Control_R", "Alt_L", "Alt_R"}  # phím có thể bấm kèm phím khác
 
 # Bit trạng thái phím bổ trợ trong sự kiện Tk

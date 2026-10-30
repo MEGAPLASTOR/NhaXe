@@ -6,7 +6,9 @@ import customtkinter as ctk
 
 from ..core.pricing import money
 from ..core.storage import parse_time, record_duration, vn_time
-from .theme import (C, WEEKDAYS, ImageBox, entry, font, load_image, make_tree, open_file, pill, primary_button,
+from .modal import ModalDialog
+from .photo_viewer import PhotoViewer
+from .theme import (C, WEEKDAYS, ImageBox, entry, font, load_image, make_tree, only_digits, open_file, pill, primary_button,
                     secondary_button, segmented, show_centered, tabview, ui_scale, zebra, brand_icon)
 
 
@@ -40,58 +42,92 @@ def day_time(text, day):
 class RecordView(ctk.CTkFrame):
     """Thẻ thông tin 1 lượt gửi: số thẻ, trạng thái, giờ vào/ra và 2 ảnh vào/ra (nhấp đúp để mở ảnh gốc)."""
 
-    def __init__(self, master, storage, title, vertical=False, on_undo=None, fee_of=None):
+    def __init__(self, master, storage, title, vertical=False, on_undo=None, fee_of=None, on_exit=None,
+                 photo_boxes=None):
+        """photo_boxes: (ô ảnh vào, ô ảnh ra) nằm ở chỗ khác để hiện ảnh; có thì 2 ô của khung này
+        thành ô camera trực tiếp (self.live_in / self.live_out)."""
         super().__init__(master, fg_color=C["surface"], corner_radius=16, border_width=1, border_color=C["border"])
         self.storage = storage
         self.fee_of = fee_of  # hàm nhận 1 lượt, trả về (tiền gửi, tạm tính hay không)
         self.on_undo = on_undo
+        self.on_exit = on_exit   # hàm nhận số thẻ, mở luôn cửa sổ cho xe ra
         self.undo_id = None   # lượt được phép hoàn tác (lượt ra vừa ghi nhận)
         self.record = None
+        self._dang_mo = False  # đang dựng cửa sổ xem ảnh
 
         head = ctk.CTkFrame(self, fg_color="transparent")
         self.title_label = ctk.CTkLabel(head, text=title, font=font(15, True), text_color=C["text"])
         self.title_label.pack(side="left")
-        ctk.CTkLabel(head, text="nhấp đúp vào ảnh để xem ảnh gốc", font=font(11),
-                     text_color=C["muted"]).pack(side="right")
+        self.hint_label = ctk.CTkLabel(head, text="bấm vào ảnh để phóng to", font=font(11), text_color=C["muted"])
+        self.hint_label.pack(side="right")
 
         # ----- vé số thẻ + thông tin -----
         info = ctk.CTkFrame(self, fg_color="transparent")
-        self.ticket = ctk.CTkFrame(info, corner_radius=14, fg_color=C["surface2"])
-        self.ticket.pack(fill="x")
+        # Màn hình chính: thẻ và thông tin nằm ngang trong 1 hàng. Hàng này phải tạo TRƯỚC rồi làm khung cha của
+        # thẻ / thông tin; nếu tạo sau rồi pack(in_=...) thì nó nằm đè lên và che mất số thẻ, giờ, tiền.
+        holder = info if vertical else ctk.CTkFrame(info, fg_color="transparent")
+        self.ticket = ctk.CTkFrame(holder, corner_radius=14, fg_color=C["surface2"])
+        # ở màn hình chính thẻ này phải gọn để nhường chỗ cho 2 khung camera
         self.ticket_caption = ctk.CTkLabel(self.ticket, text="SỐ THẺ", font=font(11, True), height=16)
-        self.ticket_caption.pack(anchor="w", padx=16, pady=(12, 0))
-        self.card_label = ctk.CTkLabel(self.ticket, text="—", font=font(40, True), height=48)
+        self.ticket_caption.pack(anchor="w", padx=16, pady=(10 if vertical else 8, 0))
+        self.card_label = ctk.CTkLabel(self.ticket, text="—", font=font(40 if vertical else 30, True),
+                                       height=48 if vertical else 36)
         self.card_label.pack(anchor="w", padx=16)
         self.badge = ctk.CTkLabel(self.ticket, text="", font=font(11, True), text_color="white",
-                                  corner_radius=8, height=24)
-        self.badge.pack(anchor="w", padx=16, pady=(2, 12))
+                                  corner_radius=8, height=24 if vertical else 20)
+        self.badge.pack(anchor="w", padx=16, pady=(2, 12 if vertical else 8))
 
-        details = ctk.CTkFrame(info, fg_color="transparent")
-        details.pack(fill="x", pady=(10, 0))
+        details = ctk.CTkFrame(holder, fg_color="transparent")
         self.values = {}
         rows = [("vao", "Giờ vào"), ("ra", "Giờ ra"), ("gui", "Thời gian gửi")]
         if fee_of is not None:
             rows.append(("tien", "Tiền gửi"))
         for i, (key, caption) in enumerate(rows):
-            ctk.CTkLabel(details, text=caption, font=font(12), text_color=C["muted"], height=24).grid(
+            row_h = 24 if vertical else 21
+            ctk.CTkLabel(details, text=caption, font=font(12), text_color=C["muted"], height=row_h).grid(
                 row=i, column=0, sticky="w")
             is_fee = key == "tien"
-            value = ctk.CTkLabel(details, text="", font=font(17 if is_fee else 13, True),
-                                 text_color=C["accent"] if is_fee else C["text2"], height=28 if is_fee else 24)
+            value = ctk.CTkLabel(details, text="", font=font(20 if is_fee else 13, True),
+                                 text_color=C["accent"] if is_fee else C["text2"],
+                                 height=row_h + 8 if is_fee else row_h)
             value.grid(row=i, column=1, sticky="w", padx=(14, 0))
             self.values[key] = value
-        self.undo_btn = ctk.CTkButton(info, text="↶   Hoàn tác lượt ra", command=self._undo, height=34,
+        # Cửa sổ tra cứu: 2 nút nằm dưới cột thông tin. Màn hình chính: nằm trên hàng tiêu đề cho khu này thấp gọn.
+        self.nut = ctk.CTkFrame(info if vertical else head, fg_color="transparent")
+        self._nut_pack = {"fill": "x", "pady": (10, 0)} if vertical else {"side": "left", "padx": (16, 0)}
+        self.undo_btn = ctk.CTkButton(self.nut, text="↶   Hoàn tác lượt ra", command=self._undo, height=34,
                                       corner_radius=10, fg_color=C["surface"], border_width=1,
                                       border_color="#fca5a5", text_color=C["danger"],
                                       hover_color=C["danger_soft"], font=font(12, True))
+        self.exit_btn = ctk.CTkButton(self.nut, text="↑   Cho xe này ra", command=self._cho_ra, height=34,
+                                      corner_radius=10, fg_color=C["out"], hover_color=C["out_hover"],
+                                      text_color="white", font=font(12, True))
+        if vertical:  # cửa sổ tra cứu: xếp dọc cho dễ đọc
+            self.ticket.pack(fill="x")
+            details.pack(fill="x", pady=(10, 0))
+        else:         # màn hình chính: thẻ và thông tin nằm ngang cho thấp
+            holder.pack(fill="x")
+            self.ticket.pack(side="left", anchor="n")
+            details.pack(side="left", anchor="n", padx=(16, 0))
 
-        # ----- 2 ảnh -----
+        # ----- 2 ô ảnh -----
         images = ctk.CTkFrame(self, fg_color="transparent")
-        min_h = int(200 * ui_scale(self))
-        self.box_in = ImageBox(images, height=min_h, on_double_click=lambda: self._open("anh_vao"))
-        self.box_out = ImageBox(images, height=min_h, on_double_click=lambda: self._open("anh_ra"))
-        cap_in = pill(images, "↓  ẢNH LÚC VÀO", C["in_text"], C["in_soft"], size=11)
-        cap_out = pill(images, "↑  ẢNH LÚC RA", C["out_text"], C["out_soft"], size=11)
+        min_h = int((200 if vertical else 150) * ui_scale(self))
+        if photo_boxes is None:
+            self.box_in = ImageBox(images, height=min_h, on_click=lambda: self._zoom("anh_vao"))
+            self.box_out = ImageBox(images, height=min_h, on_click=lambda: self._zoom("anh_ra"))
+            cap_in = pill(images, "↓  ẢNH LÚC VÀO", C["in_text"], C["in_soft"], size=11)
+            cap_out = pill(images, "↑  ẢNH LÚC RA", C["out_text"], C["out_soft"], size=11)
+            slot_in, slot_out = self.box_in, self.box_out
+        else:
+            # màn hình chính: ảnh đã chụp hiện ở 2 khung lớn phía trên, 2 ô này dành cho camera trực tiếp
+            self.box_in, self.box_out = photo_boxes
+            self.live_in = ImageBox(images, height=min_h, placeholder="Đang kết nối camera...", dark=True)
+            self.live_out = ImageBox(images, height=min_h, placeholder="Đang kết nối camera...", dark=True)
+            cap_in = pill(images, "●  CAMERA CỔNG VÀO", C["in_text"], C["in_soft"], size=11)
+            cap_out = pill(images, "●  CAMERA CỔNG RA", C["out_text"], C["out_soft"], size=11)
+            slot_in, slot_out = self.live_in, self.live_out
+            self.hint_label.configure(text="bấm vào ảnh phía trên để phóng to")
 
         if vertical:
             self.grid_columnconfigure(0, weight=1)
@@ -108,15 +144,15 @@ class RecordView(ctk.CTkFrame):
         else:
             self.grid_columnconfigure(1, weight=1)
             self.grid_rowconfigure(1, weight=1)
-            head.grid(row=0, column=0, columnspan=2, sticky="ew", padx=18, pady=(14, 10))
-            info.grid(row=1, column=0, sticky="nw", padx=(18, 18), pady=(0, 16))
-            images.grid(row=1, column=1, sticky="nsew", padx=(0, 16), pady=(0, 16))
+            head.grid(row=0, column=0, columnspan=2, sticky="ew", padx=18, pady=(10, 8))
+            info.grid(row=1, column=0, sticky="nw", padx=(18, 18), pady=(0, 12))
+            images.grid(row=1, column=1, sticky="nsew", padx=(0, 16), pady=(0, 12))
             images.grid_columnconfigure((0, 1), weight=1, uniform="img")
             images.grid_rowconfigure(1, weight=1)
             cap_in.grid(row=0, column=0, sticky="w", pady=(0, 6))
-            self.box_in.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
+            slot_in.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
             cap_out.grid(row=0, column=1, sticky="w", padx=(6, 0), pady=(0, 6))
-            self.box_out.grid(row=1, column=1, sticky="nsew", padx=(6, 0))
+            slot_out.grid(row=1, column=1, sticky="nsew", padx=(6, 0))
         self.clear()
 
     def _paint_ticket(self, color, soft):
@@ -134,7 +170,7 @@ class RecordView(ctk.CTkFrame):
             value.configure(text="—")
         self.box_in.show(None, text)
         self.box_out.show(None, text)
-        self.undo_btn.pack_forget()
+        self._nut_hien(undo=False, cho_ra=False)
 
     def show(self, rid, title=None):
         if title:
@@ -158,10 +194,19 @@ class RecordView(ctk.CTkFrame):
             self.values["tien"].configure(text=fee_text(self.fee_of, rec))
         self._show_photo(self.box_in, rec["anh_vao"], "Không có ảnh vào")
         self._show_photo(self.box_out, rec["anh_ra"], "Xe chưa ra" if parked else "Không có ảnh ra")
-        if self.on_undo and not parked and rec["id"] == self.undo_id:
-            self.undo_btn.pack(fill="x", pady=(14, 0))
-        else:
-            self.undo_btn.pack_forget()
+        self._nut_hien(undo=bool(self.on_undo) and not parked and rec["id"] == self.undo_id,
+                       cho_ra=bool(self.on_exit) and parked)
+
+    def _nut_hien(self, undo, cho_ra):
+        """Xe đang gửi thì cho nút cho ra; lượt vừa ghi ra thì cho nút hoàn tác."""
+        for nut, hien in ((self.exit_btn, cho_ra), (self.undo_btn, undo)):
+            nut.pack(side="left", padx=(0, 8)) if hien else nut.pack_forget()
+        # không có nút nào thì giấu cả hàng đi, khỏi chiếm chỗ của 2 ảnh
+        self.nut.pack(**self._nut_pack) if (undo or cho_ra) else self.nut.pack_forget()
+
+    def _cho_ra(self):
+        if self.record is not None and self.on_exit:
+            self.on_exit(self.record["so_the"])
 
     def _show_photo(self, box, rel, empty_text):
         image = load_image(self.storage.abs_path(rel))
@@ -173,9 +218,22 @@ class RecordView(ctk.CTkFrame):
         if self.record is not None:
             self.show(self.record["id"])
 
-    def _open(self, key):
-        if self.record is not None and self.record[key]:
-            open_file(self.storage.abs_path(self.record[key]))
+    def _zoom(self, key):
+        """Bấm vào ảnh thì mở cửa sổ xem ảnh to."""
+        rec = self.record
+        # Bấm nhanh 2 cái sẽ mở 2 cửa sổ chồng nhau rồi lỗi. Cờ _dang_mo chặn cú bấm thứ hai
+        # rơi vào giữa lúc đang dựng cửa sổ, any_open chặn các cú bấm sau khi đã dựng xong.
+        if rec is None or not rec[key] or self._dang_mo or ModalDialog.any_open():
+            return
+        is_in = key == "anh_vao"
+        self._dang_mo = True
+        try:
+            PhotoViewer(self.winfo_toplevel(), self.storage.abs_path(rec[key]),
+                        f"Thẻ {rec['so_the']}   ·   {'ẢNH LÚC VÀO' if is_in else 'ẢNH LÚC RA'}",
+                        vn_time(rec["gio_vao"] if is_in else rec["gio_ra"]),
+                        C["in"] if is_in else C["out"])
+        finally:
+            self._dang_mo = False
 
     def _undo(self):
         if self.record is not None and self.on_undo:
@@ -189,7 +247,7 @@ class RecordsWindow(ctk.CTkToplevel):
     STATUS = {"Tất cả": "all", "Đang gửi": "in", "Đã ra": "out"}
     SIZE = (1280, 760)
 
-    def __init__(self, master, storage, tab=0, fee_of=None):
+    def __init__(self, master, storage, tab=0, fee_of=None, on_exit=None):
         super().__init__(master, fg_color=C["bg"])
         self.withdraw()  # ẩn cho đến khi đặt đúng giữa màn hình
         self.storage = storage
@@ -218,7 +276,9 @@ class RecordsWindow(ctk.CTkToplevel):
         self._build_history(self.tabs.add(self.TABS[1]))
         self._build_daily(self.tabs.add(self.TABS[2]))
 
-        self.detail = RecordView(self, storage, "Chi tiết lượt gửi", vertical=True, fee_of=fee_of)
+        self.detail = RecordView(self, storage, "Chi tiết lượt gửi", vertical=True, fee_of=fee_of,
+                                 on_exit=self._cho_xe_ra if on_exit else None)
+        self._on_exit = on_exit
         self.detail.clear("Chọn 1 dòng trong bảng")
         self.detail.grid(row=1, column=1, sticky="nsew", padx=(8, 20), pady=(18, 20))
 
@@ -246,7 +306,7 @@ class RecordsWindow(ctk.CTkToplevel):
         tab.grid_rowconfigure(1, weight=1)
         bar = ctk.CTkFrame(tab, fg_color="transparent")
         bar.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 12))
-        self.parked_search = entry(bar, placeholder_text="Tìm theo số thẻ...", width=260)
+        self.parked_search = only_digits(entry(bar, placeholder_text="Tìm theo số thẻ...", width=260))
         self.parked_search.pack(side="left")
         self.parked_search.bind("<KeyRelease>", lambda _e: self.load_parked())
         secondary_button(bar, "Làm mới", self.refresh, width=110, height=38).pack(side="left", padx=8)
@@ -278,7 +338,7 @@ class RecordsWindow(ctk.CTkToplevel):
 
         row1 = ctk.CTkFrame(tab, fg_color="transparent")
         row1.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 10))
-        self.h_card = entry(row1, placeholder_text="Số thẻ", width=120)
+        self.h_card = only_digits(entry(row1, placeholder_text="Số thẻ", width=120))
         self.h_card.pack(side="left")
         ctk.CTkLabel(row1, text="Từ ngày", font=font(13), text_color=C["muted"]).pack(side="left", padx=(16, 6))
         self.h_from = entry(row1, placeholder_text="dd/mm/yyyy", width=130)
@@ -474,6 +534,13 @@ class RecordsWindow(ctk.CTkToplevel):
         path = self.storage.export_csv(self.day_rows, self.fee_of, name=f"ngay_{self.day:%d-%m-%Y}")
         self.d_title.configure(text=f"Đã xuất {path.name}", text_color=C["in_text"])
         open_file(path.parent)
+
+    def _cho_xe_ra(self, card):
+        """Đóng cửa sổ tra cứu rồi mở cửa sổ xe ra, nếu không hộp thoại sẽ nằm khuất phía sau."""
+        on_exit = self._on_exit
+        master = self.master
+        self.destroy()
+        master.after(120, lambda: on_exit(card))
 
     def _select(self, tree):
         selected = tree.selection()

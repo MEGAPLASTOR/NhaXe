@@ -4,7 +4,7 @@ import customtkinter as ctk
 
 from ..core.storage import CARD_PATTERN
 from .modal import ModalDialog
-from .theme import C, ImageBox, font, primary_button, secondary_button, ui_scale
+from .theme import C, ImageBox, font, only_digits, primary_button, secondary_button, ui_scale
 
 
 class CardDialog(ModalDialog):
@@ -15,7 +15,7 @@ class CardDialog(ModalDialog):
     preview   : (tùy chọn) hàm nhận số thẻ đang gõ, trả về dòng thông tin (giờ vào, tiền gửi) hoặc None
     """
 
-    def __init__(self, master, kind, photo, when, on_submit, preview=None):
+    def __init__(self, master, kind, photo, when, on_submit, preview=None, card=""):
         is_in = kind == "IN"
         super().__init__(master, "Xe vào" if is_in else "Xe ra")
         self.on_submit = on_submit
@@ -55,11 +55,12 @@ class CardDialog(ModalDialog):
         row = ctk.CTkFrame(body, fg_color="transparent")
         row.pack(fill="x", pady=(18, 6))
         ctk.CTkLabel(row, text="SỐ THẺ", font=font(12, True), text_color=C["muted"]).pack(side="left")
-        ctk.CTkLabel(row, text="Gõ số in trên thẻ rồi nhấn Enter", font=font(12),
+        ctk.CTkLabel(row, text="Gõ số in trên thẻ rồi nhấn Enter  ·  chỉ nhập được số", font=font(12),
                      text_color="#94a3b8").pack(side="right")
         self.entry = ctk.CTkEntry(body, font=font(42, True), height=80, justify="center", corner_radius=14,
                                   fg_color=soft, border_color=color, border_width=2, text_color=C["text"])
         self.entry.pack(fill="x")
+        only_digits(self.entry)
         if preview is not None:
             self.info = ctk.CTkLabel(body, text="", font=font(15, True), text_color=C["out_text"],
                                      fg_color="transparent", corner_radius=8, height=34)
@@ -79,6 +80,10 @@ class CardDialog(ModalDialog):
 
         self.entry.bind("<Return>", lambda _e: self.submit())
         self.entry.bind("<KP_Enter>", lambda _e: self.submit())
+        if card:  # mở từ nút "Cho xe này ra": điền sẵn số thẻ, chỉ việc nhấn Enter
+            self.entry.insert(0, card)
+            if preview is not None:
+                self._update_preview()
         self.focus_target = self.entry
         self.present()
 
@@ -95,7 +100,7 @@ class CardDialog(ModalDialog):
         if not card:
             return self._fail("Chưa nhập số thẻ")
         if not CARD_PATTERN.match(card):
-            return self._fail("Số thẻ chỉ gồm chữ và số, tối đa 20 ký tự")
+            return self._fail("Số thẻ chỉ gồm chữ số, tối đa 20 chữ số")
         error = self.on_submit(card)
         if error:
             return self._fail(error)

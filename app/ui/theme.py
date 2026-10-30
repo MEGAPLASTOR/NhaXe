@@ -235,6 +235,20 @@ def entry(master, **kw):
                         border_width=1, text_color=C["text"], placeholder_text_color="#94a3b8", **kw)
 
 
+def only_digits(entry, max_len=20):
+    """Chặn gõ chữ vào ô nhập, chỉ nhận chữ số. Trả về chính ô nhập đó."""
+    inner = entry._entry  # ô nhập tk thật bên trong CTkEntry
+
+    def nhan(text):
+        # CustomTkinter tự điền chữ gợi ý vào ô, phải cho qua; chặn ở đây Tk sẽ tắt luôn kiểm tra
+        if text == "" or text == (entry.cget("placeholder_text") or ""):
+            return True
+        return text.isascii() and text.isdigit() and len(text) <= max_len
+
+    inner.configure(validate="key", validatecommand=(inner.register(nhan), "%P"))
+    return entry
+
+
 def segmented(master, values, command=None, **kw):
     """Nút chọn kiểu iOS: nền xám, mục đang chọn màu trắng."""
     return ctk.CTkSegmentedButton(master, values=values, command=command, corner_radius=10,
@@ -270,7 +284,7 @@ def draw_live_badge(img):
 class ImageBox(tk.Frame):
     """Khung hiển thị ảnh tự co giãn theo kích thước, giữ đúng tỉ lệ."""
 
-    def __init__(self, master, placeholder="Chưa có ảnh", width=0, height=0, on_double_click=None, dark=False):
+    def __init__(self, master, placeholder="Chưa có ảnh", width=0, height=0, on_click=None, dark=False):
         bg = C["screen"] if dark else C["photo_bg"]
         super().__init__(master, bg=bg, width=width, height=height, highlightthickness=0, bd=0)
         self.pack_propagate(False)
@@ -282,9 +296,10 @@ class ImageBox(tk.Frame):
         self._pil = None
         self._photo = None
         self.bind("<Configure>", lambda _e: self._render())
-        if on_double_click:
+        if on_click:
+            # trả "break" để một cú bấm không chạy tiếp lên khung cha, tránh mở 2 cửa sổ
             for widget in (self, self.label):
-                widget.bind("<Double-Button-1>", lambda _e: on_double_click())
+                widget.bind("<Button-1>", lambda _e: (on_click(), "break")[1])
                 widget.configure(cursor="hand2")
 
     def show(self, pil=None, text=None):

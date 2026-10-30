@@ -30,9 +30,9 @@ if errorlevel 1 goto :fail
 
 :check_libs
 rem ---- Cai thu vien neu chua co ----
-".venv\Scripts\python.exe" -c "import cv2, PIL, customtkinter" >nul 2>nul
+".venv\Scripts\python.exe" -c "import cv2, PIL, customtkinter, edge_tts" >nul 2>nul
 if errorlevel 1 (
-    echo Dang cai thu vien opencv-python, pillow, customtkinter - chi can lam 1 lan...
+    echo Dang cai thu vien opencv-python, pillow, customtkinter, edge-tts - chi can lam 1 lan...
     ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r requirements.txt
     if errorlevel 1 goto :fail
 )

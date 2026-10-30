@@ -1,3 +1,4 @@
 opencv-python
 pillow
 customtkinter
+edge-tts

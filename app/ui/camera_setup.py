@@ -81,7 +81,16 @@ class CameraSetupDialog(ModalDialog):
         threading.Thread(target=self._scan_thread, daemon=True).start()
 
     def _scan_thread(self):
-        found = scan(progress=lambda done, total: self.after(0, self._tick, done, total))
+        # Báo tiến trình cho cả 254 địa chỉ thì CustomTkinter vẽ lại 254 lần và nghẽn hẳn,
+        # nên chỉ báo khoảng 40 lần.
+        moc = [0]
+
+        def bao(done, total):
+            if done == total or done - moc[0] >= max(1, total // 40):
+                moc[0] = done
+                self.after(0, self._tick, done, total)
+
+        found = scan(progress=bao)
         self.after(0, self._done, found)
 
     def _tick(self, done, total):
