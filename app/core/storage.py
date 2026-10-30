@@ -73,17 +73,24 @@ def record_duration(rec):
 
 
 def stamp(frame, lines):
-    """Ghi thông tin (chỉ ký tự không dấu) lên góc dưới ảnh, cỡ chữ theo độ phân giải."""
+    """Ghi thông tin (chỉ ký tự không dấu) thành ô nhỏ nền tối mờ ở góc trên bên trái, để không che mất xe.
+    Cỡ chữ theo độ phân giải. (Góc trên bên phải là giờ của chính camera Imou.)"""
     img = frame.copy()
-    h, w = img.shape[:2]
-    s = w / 900
-    line_h = int(40 * s)
-    thickness = max(1, round(2 * s))
-    box_h = line_h * len(lines) + int(12 * s)
-    cv2.rectangle(img, (0, h - box_h), (w, h), (0, 0, 0), -1)
+    w = img.shape[1]
+    s = w / 1800                        # cỡ chữ: ảnh rộng 1800px -> 1.0
+    thickness = max(1, round(1.6 * s))
+    pad, gap = int(10 * s), int(10 * s)
+    sizes = [cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, s, thickness)[0] for text in lines]
+    line_h = max(th for _tw, th in sizes) + gap
+    margin = int(14 * s)
+    x2 = margin + 2 * pad + max(tw for tw, _th in sizes)
+    y2 = margin + 2 * pad + line_h * len(lines) - gap
+    box = img[margin:y2, margin:x2]
+    box[:] = (box * 0.35).astype(box.dtype)   # nền tối mờ, vẫn thấy hình phía sau
     for i, text in enumerate(lines):
-        y = h - box_h + line_h * (i + 1)
-        cv2.putText(img, text, (int(12 * s), y), cv2.FONT_HERSHEY_SIMPLEX, s, (255, 255, 255), thickness)
+        y = margin + pad + line_h * i + sizes[i][1]
+        cv2.putText(img, text, (margin + pad, y), cv2.FONT_HERSHEY_SIMPLEX, s, (255, 255, 255), thickness,
+                    cv2.LINE_AA)
     return img
 
 

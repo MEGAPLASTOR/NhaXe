@@ -424,9 +424,10 @@ class SettingsWindow(ctk.CTkToplevel):
             child.destroy()
         vietnamese = self.speaker.vietnamese_voice()
         if self.speaker.has_vietnamese():
-            ready = (["Edge (giọng tự nhiên, cần mạng)"] if self.speaker.edge_ok else []) + \
+            # tên giọng Windows dạng "Microsoft An - Vietnamese (Vietnam)": chỉ giữ phần tên cho khỏi tràn dòng
+            ready = (["Edge (cần mạng)"] if self.speaker.edge_ok else []) + \
                     (["Piper (không cần mạng)"] if self.speaker.piper_ok else []) + \
-                    ([f"Windows: {vietnamese}"] if vietnamese else [])
+                    ([f"Windows ({vietnamese.split(' - ')[0]})"] if vietnamese else [])
             ctk.CTkLabel(self.voice_state, text="✓  Giọng Tiếng Việt sẵn sàng:  " + "   ·   ".join(ready),
                          font=font(13, True), text_color=C["in_text"]).pack(side="left")
             if install_result is not None and vietnamese:

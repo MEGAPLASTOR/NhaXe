@@ -20,7 +20,7 @@ from PIL import Image
 
 APP_NAME = "Quản Lý Nhà Xe"
 COMPANY = "VIDATEX JSC"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 EXE_NAME = "QuanLyNhaXe.exe"
 VOICE_DIR = "giong_doc"
 UNINSTALLER = "GoCaiDat.exe"

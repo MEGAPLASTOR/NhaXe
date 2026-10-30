@@ -36,9 +36,9 @@ from .theme import (C, WEEKDAYS, ImageBox, apply_ui_scale, bgr_to_pil, brand_ico
                     style_treeview, ui_scale, zebra)
 
 AUTO_CAMERA_SETUP = True       # chưa cấu hình camera thì tự mở cửa sổ tìm camera (tắt khi chạy thử)
-BOTTOM_SHARE = 0.42            # phần màn hình dành cho khu dưới (có 2 ô camera trực tiếp), còn lại là 2 khung ảnh
-BOTTOM_MIN, BOTTOM_MAX = 260, 430   # giới hạn chiều cao khu dưới (chưa nhân hệ số phóng)
-HEADER_FULL = 1290             # hẹp hơn mức này thì thanh trên không đủ chỗ cho 3 ô thống kê
+BOTTOM_SHARE = 0.40            # phần màn hình dành cho khu dưới (có 2 ô camera trực tiếp), còn lại là 2 khung ảnh
+BOTTOM_MIN, BOTTOM_MAX = 245, 410   # giới hạn chiều cao khu dưới (chưa nhân hệ số phóng)
+HEADER_FULL = 1220             # hẹp hơn mức này thì thanh trên không đủ chỗ cho 3 ô thống kê
 FULLSCREEN_KEY = "F11"         # bật / tắt toàn màn hình, không cần mật khẩu
 KEY_COOLDOWN = 0.6             # giây, chống lặp khi giữ phím
 CLEANUP_INTERVAL = 3600 * 1000  # dọn ảnh cũ mỗi giờ (mili giây)
@@ -62,22 +62,20 @@ class CameraCard(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
+        # tiêu đề, trạng thái, phím tắt và nút nằm chung 1 hàng để ảnh được cao nhất có thể
         top = ctk.CTkFrame(self, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 10))
+        top.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 8))
         pill(top, title, color, soft, size=13).pack(side="left")
-        self.state_label = ctk.CTkLabel(top, text="", font=font(12, True), text_color=C["muted"])
-        self.state_label.pack(side="right")
+        # nút và phím xếp trước để luôn hiện đủ; dòng trạng thái dài thì bị cắt bớt chứ không che phím
+        primary_button(top, action, command, color=color, hover=hover, width=170, height=36).pack(side="right")
+        self.key_cap = keycap(top, "")
+        self.key_cap.pack(side="right", padx=(6, 12))
+        ctk.CTkLabel(top, text="Nhấn", font=font(12), text_color=C["muted"]).pack(side="right")
+        self.state_label = ctk.CTkLabel(top, text="", font=font(12, True), text_color=C["muted"], anchor="w")
+        self.state_label.pack(side="left", padx=12, fill="x", expand=True)
 
         self.screen = ImageBox(self, placeholder="Chưa có ảnh", dark=True, on_click=on_zoom)
-        self.screen.grid(row=1, column=0, sticky="nsew", padx=16)
-
-        bottom = ctk.CTkFrame(self, fg_color="transparent")
-        bottom.grid(row=2, column=0, sticky="ew", padx=16, pady=(12, 14))
-        ctk.CTkLabel(bottom, text="Nhấn", font=font(13), text_color=C["muted"]).pack(side="left")
-        self.key_cap = keycap(bottom, "")
-        self.key_cap.pack(side="left", padx=8)
-        ctk.CTkLabel(bottom, text=f"để {action.lower()}", font=font(13), text_color=C["muted"]).pack(side="left")
-        primary_button(bottom, action, command, color=color, hover=hover, width=170, height=38).pack(side="right")
+        self.screen.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
         self._last_state = None
 
     def set_keys(self, keys):
@@ -192,6 +190,7 @@ class MainWindow(ctk.CTk):
             self.after(120, lambda: self._maximize(tries - 1))
 
     def _build_header(self):
+        """Thanh trên gọn 1 hàng (cao ~50px) để nhường chỗ cho 2 khung ảnh và camera."""
         bar = ctk.CTkFrame(self, fg_color=C["surface"], corner_radius=0, border_width=0)
         bar.grid(row=0, column=0, sticky="ew")
         bar.grid_columnconfigure(1, weight=1)
@@ -199,20 +198,18 @@ class MainWindow(ctk.CTk):
             row=1, column=0, columnspan=3, sticky="ew")
 
         brand = ctk.CTkFrame(bar, fg_color="transparent")
-        brand.grid(row=0, column=0, padx=22, pady=12, sticky="w")
-        logo = logo_image(52)
+        brand.grid(row=0, column=0, padx=(18, 12), pady=6, sticky="w")
+        logo = logo_image(34)
         if logo is not None:
             ctk.CTkLabel(brand, text="", image=logo).pack(side="left")
         else:
-            ctk.CTkLabel(brand, text="V", width=52, height=52, corner_radius=14, fg_color=C["accent"],
-                         text_color="white", font=font(26, True)).pack(side="left")
-        ctk.CTkFrame(brand, fg_color=C["border"], width=1, height=40).pack(side="left", padx=14)
+            ctk.CTkLabel(brand, text="V", width=34, height=34, corner_radius=10, fg_color=C["accent"],
+                         text_color="white", font=font(18, True)).pack(side="left")
+        ctk.CTkFrame(brand, fg_color=C["border"], width=1, height=28).pack(side="left", padx=10)
         names = ctk.CTkFrame(brand, fg_color="transparent")
         names.pack(side="left")
-        ctk.CTkLabel(names, text=COMPANY, font=font(11, True), text_color=C["brand_teal"], height=16).pack(anchor="w")
-        ctk.CTkLabel(names, text=APP_NAME, font=font(21, True), text_color=C["brand_navy"], height=28).pack(anchor="w")
-        ctk.CTkLabel(names, text="Hệ thống ghi nhận xe vào / ra bằng camera", font=font(11),
-                     text_color=C["muted"], height=16).pack(anchor="w")
+        ctk.CTkLabel(names, text=COMPANY, font=font(9, True), text_color=C["brand_teal"], height=12).pack(anchor="w")
+        ctk.CTkLabel(names, text=APP_NAME, font=font(16, True), text_color=C["brand_navy"], height=22).pack(anchor="w")
 
         stats = self.stats_box = ctk.CTkFrame(bar, fg_color="transparent")
         stats.grid(row=0, column=1)
@@ -222,32 +219,34 @@ class MainWindow(ctk.CTk):
         for key, title, color, soft in (("parked", "ĐANG GỬI", C["accent"], C["accent_soft"]),
                                         ("in", "VÀO HÔM NAY", C["in_text"], C["in_soft"]),
                                         ("out", "RA HÔM NAY", C["out_text"], C["out_soft"])):
-            chip = ctk.CTkFrame(stats, fg_color=soft, corner_radius=14)
-            chip.pack(side="left", padx=6)
-            ctk.CTkLabel(chip, text=title, font=font(10, True), text_color=color, height=16).pack(
-                anchor="w", padx=18, pady=(8, 0))
-            value = ctk.CTkLabel(chip, text="0", font=font(24, True), text_color=color, height=30)
-            value.pack(anchor="w", padx=18, pady=(0, 8))
+            # chữ và số nằm chung 1 hàng cho thấp
+            chip = ctk.CTkFrame(stats, fg_color=soft, corner_radius=10)
+            chip.pack(side="left", padx=4)
+            ctk.CTkLabel(chip, text=title, font=font(10, True), text_color=color, height=30).pack(
+                side="left", padx=(12, 8), pady=2)
+            value = ctk.CTkLabel(chip, text="0", font=font(18, True), text_color=color, height=30)
+            value.pack(side="left", padx=(0, 12), pady=2)
             self.stat_labels[key] = value
 
         right = ctk.CTkFrame(bar, fg_color="transparent")
-        right.grid(row=0, column=2, padx=22, sticky="e")
-        self.btn_parked = secondary_button(right, "", lambda: self.open_records(0), width=160)
-        self.btn_parked.pack(side="left", padx=4)
-        self.btn_history = secondary_button(right, "", lambda: self.open_records(1), width=140)
-        self.btn_history.pack(side="left", padx=4)
-        secondary_button(right, "⚙  Cài đặt", self.open_settings, width=120).pack(side="left", padx=4)
-        secondary_button(right, "🔒", self.lock_screen, width=46).pack(side="left", padx=4)
+        right.grid(row=0, column=2, padx=(12, 18), sticky="e")
+        small = {"height": 32, "font": font(12, True)}
+        self.btn_parked = secondary_button(right, "", lambda: self.open_records(0), width=150, **small)
+        self.btn_parked.pack(side="left", padx=3)
+        self.btn_history = secondary_button(right, "", lambda: self.open_records(1), width=120, **small)
+        self.btn_history.pack(side="left", padx=3)
+        secondary_button(right, "⚙  Cài đặt", self.open_settings, width=104, **small).pack(side="left", padx=3)
+        secondary_button(right, "🔒", self.lock_screen, width=40, **small).pack(side="left", padx=3)
         clock = ctk.CTkFrame(right, fg_color="transparent")
-        clock.pack(side="left", padx=(20, 0))
-        self.clock_time = ctk.CTkLabel(clock, text="", font=font(24, True), text_color=C["text"], height=30)
+        clock.pack(side="left", padx=(16, 0))
+        self.clock_time = ctk.CTkLabel(clock, text="", font=font(18, True), text_color=C["text"], height=22)
         self.clock_time.pack(anchor="e")
-        self.clock_date = ctk.CTkLabel(clock, text="", font=font(12), text_color=C["muted"], height=18)
+        self.clock_date = ctk.CTkLabel(clock, text="", font=font(10), text_color=C["muted"], height=13)
         self.clock_date.pack(anchor="e")
 
     def _build_body(self):
         body = ctk.CTkFrame(self, fg_color="transparent")
-        body.grid(row=1, column=0, sticky="nsew", padx=18, pady=14)
+        body.grid(row=1, column=0, sticky="nsew", padx=18, pady=10)
         body.grid_columnconfigure((0, 1), weight=1, uniform="cam")
         body.grid_rowconfigure(0, weight=1)  # 2 khung ảnh vừa chụp chiếm phần lớn màn hình
         body.grid_rowconfigure(1, weight=0)
