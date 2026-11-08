@@ -2,4 +2,4 @@
 
 APP_NAME = "Quản Lý Nhà Xe"
 COMPANY = "VIDATEX JSC"
-VERSION = "1.1.1"
+VERSION = "1.2.0"

@@ -93,7 +93,7 @@ Xe đã ra rồi thì không có nút này; thay vào đó lượt vừa cho ra 
 nên không sợ ghi nhầm thẻ. Các ô tìm kiếm theo số thẻ cũng vậy.
 
 Nút **⚙ Cài đặt** cần mật khẩu quản lý (mặc định `Nha@123`, đổi bằng nút **Đổi mật khẩu** trong Cài đặt).
-Trong đó: đổi phím, nhập IP / mật khẩu camera, **giá gửi xe**, **giọng nói**, số ngày giữ ảnh.
+Trong đó: đổi phím, nhập IP / mật khẩu camera, **giá gửi xe**, **giọng nói**, **Discord**, số ngày giữ ảnh.
 
 ### Giọng nói
 Xe vào máy đọc **“Xin mời vào”**, xe ra đọc tiền gửi của lượt đó kèm **“Hẹn gặp lại”**
@@ -122,6 +122,30 @@ Thư mục `giong_doc` không nằm trong git (quá nặng). Máy mới muốn �
 - [vi_VN-vais1000-medium.onnx](https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/vi/vi_VN/vais1000/medium/vi_VN-vais1000-medium.onnx)
   và [file .onnx.json](https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/vi/vi_VN/vais1000/medium/vi_VN-vais1000-medium.onnx.json) → đặt vào `giong_doc/`
 
+### Discord: báo cáo 00:00 và tra cứu
+Cài trong **⚙ Cài đặt → Discord**, có 2 phần độc lập:
+
+**1. Báo cáo hằng ngày qua webhook** (chỉ gửi một chiều). Lấy webhook: chuột phải kênh → Chỉnh sửa kênh →
+Tích hợp → Webhook → Webhook mới → Sao chép URL webhook, dán vào ô **Địa chỉ webhook**, bấm **Gửi thử**.
+Đúng 00:00 mỗi ngày phần mềm gửi thống kê ngày vừa qua (xe trong ngày, vào, ra, còn trong bãi, tiền thu,
+đang gửi) kèm file CSV danh sách xe. Máy tắt lúc 00:00 thì lần mở sau gửi bù (tối đa 7 ngày);
+mất mạng thì 5 phút sau thử lại. Ngày đã gửi ghi trong `data/discord.json`.
+
+**2. Tra cứu bằng bot** (thư viện `discord.py`). Tạo bot: [discord.com/developers](https://discord.com/developers/applications)
+→ New Application → Bot → Reset Token, dán token vào ô **Token bot**. Mời bot vào server: OAuth2 → URL Generator →
+tích `bot` và `applications.commands`, quyền Send Messages / Embed Links / Attach Files → mở link, chọn server.
+Ô **ID kênh** (bật Developer Mode rồi chuột phải kênh → Sao chép ID) giới hạn lệnh chỉ dùng trong kênh đó.
+
+| Lệnh | Trả về |
+|---|---|
+| `/thongke [ngay]` | Thống kê 1 ngày (mặc định hôm nay) + file CSV. Ngày gõ `31/10/2026`, `31/10`, `hôm qua` |
+| `/lichsu [ngay]` | Danh sách từng lượt trong ngày (đang gửi / gửi qua đêm / đã ra) |
+| `/tracuu the [so_luot]` | Các lượt gần nhất của 1 số thẻ + ảnh vào / ra của lượt mới nhất |
+| `/danggui` | Các xe đang gửi trong bãi |
+
+Bot chỉ chạy khi phần mềm đang mở và máy có mạng. Webhook và token nằm trong `config.ini`,
+đừng đưa file này cho người lạ.
+
 ### Tính tiền gửi xe
 Có 2 khung giờ, mỗi khung có giờ bắt đầu, giờ kết thúc và giá 1 lượt (mặc định Ban ngày 06:00–18:00, Ban đêm 18:00–06:00).
 Xe chạm khung nào thì tính tiền khung đó, gửi qua nhiều khung hoặc qua ngày hôm sau thì **cộng dồn**:
@@ -139,13 +163,13 @@ NhaXe/
 ├── dong_goi.bat          đóng gói thành file .exe
 ├── tao_shortcut.bat      tạo shortcut ngoài Desktop
 ├── QuanLyNhaXe.py        điểm khởi động của bản đóng gói
-├── config.ini            cài đặt (camera, phím tắt, giá vé, lưu trữ) — sửa trong nút Cài đặt
+├── config.ini            cài đặt (camera, phím tắt, giá vé, giọng nói, Discord) — sửa trong nút Cài đặt
 ├── requirements.txt      thư viện Python cần cài
 ├── assets/               logo, biểu tượng công ty
 ├── ban_phat_hanh/        CaiDat_QuanLyNhaXe.exe (bộ cài) + QuanLyNhaXe.exe (bản chạy thẳng)
 ├── cong_cu/              mã nguồn bộ cài, thông tin phiên bản, file tạm lúc đóng gói
 ├── app/                  mã nguồn
-│   ├── core/             camera, dò camera, RTSP, lưu trữ, phím tắt, giá vé, cài đặt
+│   ├── core/             camera, RTSP, lưu trữ, phím tắt, giá vé, giọng nói, thống kê, Discord, cài đặt
 │   └── ui/               giao diện: màn hình chính, nhập thẻ, tra cứu, xem ảnh, cài đặt
 └── data/                 dữ liệu (tự tạo khi chạy)
     ├── nhaxe.db          thông tin các lượt gửi xe

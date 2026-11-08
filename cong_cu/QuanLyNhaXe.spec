@@ -1,8 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_submodules
 
 datas = [('C:/Users/dinht/Documents/NhaXe/assets', 'assets')]
+hiddenimports = ['edge_tts', 'discord']
 datas += collect_data_files('customtkinter')
+hiddenimports += collect_submodules('discord.app_commands')
 
 
 a = Analysis(
@@ -10,7 +13,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=datas,
-    hiddenimports=['edge_tts'],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

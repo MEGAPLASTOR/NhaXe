@@ -25,6 +25,7 @@ from ..core.storage import Storage, parse_time, record_duration, short_time, vn_
 from ..paths import CONFIG_FILE, DATA_DIR, SOUND_CACHE_DIR, VOICE_DIR
 from .camera_setup import CameraSetupDialog
 from .card_dialog import CardDialog
+from .discord_service import DiscordService
 from .lock_screen import LockScreen
 from .modal import ModalDialog
 from .password_dialog import PasswordDialog
@@ -111,6 +112,8 @@ class MainWindow(ctk.CTk):
         self.storage = Storage(DATA_DIR)
         self._start_cameras()
         self.speaker = Speaker(VOICE_DIR, SOUND_CACHE_DIR)
+        self.discord = DiscordService(self, self.storage, self.fee_of, DATA_DIR, self.set_status)
+        self.discord.apply(self.settings["discord"])
 
         self.dialog = None      # cửa sổ nhập số thẻ đang mở
         self.records = None     # cửa sổ tra cứu
@@ -505,7 +508,8 @@ class MainWindow(ctk.CTk):
             return
         self.settings_win = SettingsWindow(self, self.settings, self.apply_settings, self.cleanup_photos,
                                            self.storage.image_dir, lambda: self.open_reset(authorized=True),
-                                           self.change_password, self.open_camera_setup, self.speaker)
+                                           self.change_password, self.open_camera_setup, self.speaker,
+                                           self.discord)
 
     # ================= Tự tìm camera =================
     def open_camera_setup(self):
@@ -566,6 +570,8 @@ class MainWindow(ctk.CTk):
         if new["prices"] != old["prices"]:
             self.refresh_data()  # tiền tạm tính của xe đang gửi theo bảng giá mới
             self.last_view.refresh()
+        if new["discord"] != old["discord"]:
+            self.discord.apply(new["discord"])
         if new["voice"] != old["voice"] or new["prices"] != old["prices"]:
             self._prefetch_voice()
         if new["scale"] != old["scale"]:
@@ -640,6 +646,7 @@ class MainWindow(ctk.CTk):
             pass
 
     def on_close(self):
+        self.discord.stop()
         self.speaker.stop()
         self.cam_in.stop()
         self.cam_out.stop()

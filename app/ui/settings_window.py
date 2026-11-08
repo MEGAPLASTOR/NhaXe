@@ -11,11 +11,12 @@ import customtkinter as ctk
 from ..core.keys import (ACTION_TITLES, ACTIONS, COMBO_MODIFIERS, DEFAULT_KEYS, MAX_KEYS, RESERVED, event_key,
                          key_name, keys_text)
 from ..core.pricing import fee_detail, detail_text, money, parse_hm, parse_money
+from ..core.discord_hook import valid_webhook
 from ..core.settings import check_password, hash_password
 from ..core.speech import (AUTO_VOICE, DEFAULT_SAY_IN, DEFAULT_SAY_OUT, INSTALL_DENIED, INSTALL_MISSING, INSTALL_OK,
                            PLACEHOLDERS, WIN_PREFIX, fill, install_vietnamese_voice)
 from .password_dialog import ChangePasswordDialog
-from .theme import (C, SCALE_CHOICES, auto_scale, card, entry, font, open_file, pill, primary_button,
+from .theme import (C, SCALE_CHOICES, auto_scale, card, entry, font, only_digits, open_file, pill, primary_button,
                    secondary_button, segmented, brand_icon, show_centered, tabview)
 
 STREAMS = {"0": "Nét (luồng chính)", "1": "Mượt (luồng phụ)"}
@@ -39,10 +40,11 @@ class SettingsWindow(ctk.CTkToplevel):
     on_password: hàm nhận mã băm mật khẩu mới, lưu ngay (không cần bấm Lưu cài đặt)
     on_discover: hàm mở cửa sổ tự tìm camera trong mạng
     speaker    : bộ đọc giọng nói (dùng cho danh sách giọng và nút Nghe thử)
+    discord    : DiscordService (nút Gửi thử, trạng thái bot); None = ẩn phần thử
     """
 
     def __init__(self, master, settings, on_save, on_cleanup, image_dir, on_reset, on_password, on_discover,
-                 speaker):
+                 speaker, discord=None):
         super().__init__(master, fg_color=C["bg"])
         self.withdraw()  # ẩn cho đến khi đặt đúng giữa màn hình
         self.settings = copy.deepcopy(settings)
@@ -52,6 +54,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.on_password = on_password
         self.on_discover = on_discover
         self.speaker = speaker
+        self.discord = discord
         self._voice_keys = {AUTO_VOICE_LABEL: AUTO_VOICE}  # tên trong danh sách -> mã giọng lưu vào cài đặt
         self._installing = False     # đang tải / cài giọng Tiếng Việt
         self._install_result = None  # mã kết quả luồng cài giọng gửi về
@@ -70,7 +73,7 @@ class SettingsWindow(ctk.CTkToplevel):
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=22, pady=(18, 0))
         ctk.CTkLabel(head, text="⚙  Cài đặt", font=font(22, True), text_color=C["text"]).pack(side="left")
-        ctk.CTkLabel(head, text="Phím tắt, camera, giá gửi xe, giọng nói và thời gian lưu ảnh", font=font(12),
+        ctk.CTkLabel(head, text="Phím tắt, camera, giá gửi xe, giọng nói, Discord và thời gian lưu ảnh", font=font(12),
                      text_color=C["muted"]).pack(side="left", padx=14, pady=(6, 0))
 
         self.tabs = tabview(self)
@@ -79,6 +82,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self._build_cameras(self.tabs.add("Camera"))
         self._build_prices(self.tabs.add("Giá gửi xe"))
         self._build_voice(self.tabs.add("Giọng nói"))
+        self._build_discord(self.tabs.add("Discord"))
         self._build_storage(self.tabs.add("Lưu trữ ảnh"))
         self._build_display(self.tabs.add("Giao diện"))
 
@@ -509,6 +513,94 @@ class SettingsWindow(ctk.CTkToplevel):
             self.say_fields[key].insert(0, default)
         self.voice_note.configure(text="Đã khôi phục lời mặc định", text_color=C["muted"])
 
+    # ================= Discord =================
+    def _build_discord(self, tab):
+        dc = self.settings["discord"]
+        box = card(tab)
+        box.pack(fill="x", padx=10, pady=(10, 0))
+        self.dc_on = ctk.CTkSwitch(box, text="Gửi thống kê lên Discord lúc 00:00 mỗi ngày", font=font(15, True),
+                                   text_color=C["text"], progress_color=C["accent"])
+        self.dc_on.select() if dc["on"] else self.dc_on.deselect()
+        self.dc_on.pack(anchor="w", padx=20, pady=(14, 8))
+        ctk.CTkLabel(box, text="Địa chỉ webhook của kênh", font=font(12, True), text_color=C["muted"],
+                     height=20).pack(anchor="w", padx=20)
+        row = ctk.CTkFrame(box, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=(2, 4))
+        self.dc_webhook = entry(row, height=36, font=font(13),
+                                placeholder_text="https://discord.com/api/webhooks/...")
+        if dc["webhook"]:
+            self.dc_webhook.insert(0, dc["webhook"])
+        self.dc_webhook.pack(side="left", fill="x", expand=True)
+        if self.discord is not None:
+            secondary_button(row, "Gửi thử", self._test_webhook, width=100, height=36).pack(side="left", padx=(10, 0))
+        self.dc_note = ctk.CTkLabel(box, text="", font=font(12, True), text_color=C["muted"], height=18)
+        self.dc_note.pack(anchor="w", padx=20)
+        ctk.CTkLabel(box, text="Báo cáo gồm số xe vào / ra, xe còn trong bãi, tiền thu và file Excel danh sách xe "
+                               "của ngày vừa qua. Máy tắt lúc 00:00 thì lần mở sau tự gửi bù.\n"
+                               "Lấy webhook: chuột phải kênh → Chỉnh sửa kênh → Tích hợp → Webhook → "
+                               "Webhook mới → Sao chép URL webhook.",
+                     font=font(12), text_color=C["muted"], justify="left").pack(anchor="w", padx=20, pady=(2, 14))
+
+        box = card(tab)
+        box.pack(fill="x", padx=10, pady=(12, 0))
+        self.dc_bot = ctk.CTkSwitch(box, text="Cho tra cứu từ Discord bằng bot", font=font(15, True),
+                                    text_color=C["text"], progress_color=C["accent"])
+        self.dc_bot.select() if dc["bot_on"] else self.dc_bot.deselect()
+        self.dc_bot.pack(anchor="w", padx=20, pady=(14, 8))
+        row = ctk.CTkFrame(box, fg_color="transparent")
+        row.pack(fill="x", padx=20)
+        row.grid_columnconfigure(0, weight=3)
+        row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(row, text="Token bot", font=font(12, True), text_color=C["muted"], height=20).grid(
+            row=0, column=0, sticky="w")
+        ctk.CTkLabel(row, text="ID kênh tra cứu (bỏ trống = mọi kênh)", font=font(12, True), text_color=C["muted"],
+                     height=20).grid(row=0, column=1, sticky="w", padx=(10, 0))
+        self.dc_token = entry(row, height=36, font=font(13), show="•")
+        if dc["bot_token"]:
+            self.dc_token.insert(0, dc["bot_token"])
+        self.dc_token.grid(row=1, column=0, sticky="ew")
+        self.dc_channel = only_digits(entry(row, height=36, font=font(13)), max_len=25)
+        if dc["channel"]:
+            self.dc_channel.insert(0, dc["channel"])
+        self.dc_channel.grid(row=1, column=1, sticky="ew", padx=(10, 0))
+        self.dc_bot_state = ctk.CTkLabel(box, text="", font=font(12, True), height=20)
+        self.dc_bot_state.pack(anchor="w", padx=20, pady=(6, 0))
+        ctk.CTkLabel(box, text="Lệnh trong Discord:  /thongke [ngày]   /lichsu [ngày]   /tracuu số-thẻ   /danggui\n"
+                               "Tạo bot: discord.com/developers → New Application → Bot → Reset Token. Mời bot: "
+                               "OAuth2 → URL Generator → tích bot + applications.commands.",
+                     font=font(12), text_color=C["muted"], justify="left").pack(anchor="w", padx=20, pady=(4, 14))
+        self._show_bot_state()
+
+    def _show_bot_state(self):
+        """Trạng thái bot cập nhật liên tục trong lúc mở Cài đặt."""
+        if not self.winfo_exists() or self.discord is None:
+            return
+        text, level = self.discord.bot_status
+        color = {"ok": C["in_text"], "warn": C["warn"], "error": C["danger"]}.get(level, C["muted"])
+        self.dc_bot_state.configure(text=f"●  {text}", text_color=color)
+        self.after(1500, self._show_bot_state)
+
+    def _test_webhook(self):
+        self.dc_note.configure(text="Đang gửi thử...", text_color=C["accent"])
+
+        def done(ok, text):
+            if self.winfo_exists():
+                self.dc_note.configure(text=("✓  " if ok else "⚠  ") + text,
+                                       text_color=C["in_text"] if ok else C["danger"])
+
+        self.discord.send_test(self.dc_webhook.get().strip(), done)
+
+    def _read_discord(self):
+        """Đọc tab Discord. Trả về (cài đặt, lỗi)."""
+        dc = {"on": bool(self.dc_on.get()), "webhook": self.dc_webhook.get().strip(),
+              "bot_on": bool(self.dc_bot.get()), "bot_token": self.dc_token.get().strip(),
+              "channel": self.dc_channel.get().strip()}
+        if dc["on"] and not valid_webhook(dc["webhook"]):
+            return None, "Discord: địa chỉ webhook phải dạng https://discord.com/api/webhooks/..."
+        if dc["bot_on"] and not dc["bot_token"]:
+            return None, "Discord: bật tra cứu thì phải nhập token bot"
+        return dc, None
+
     # ================= Lưu trữ ảnh =================
     def _build_storage(self, tab):
         box = card(tab)
@@ -642,8 +734,14 @@ class SettingsWindow(ctk.CTkToplevel):
             self.tabs.set("Giá gửi xe")
             self.footer_note.configure(text=error, text_color=C["danger"])
             return
+        discord, error = self._read_discord()
+        if error:
+            self.tabs.set("Discord")
+            self.footer_note.configure(text=error, text_color=C["danger"])
+            return
         self.settings["keep_days"] = days
         self.settings["prices"] = prices
+        self.settings["discord"] = discord
         self.settings["voice"] = {
             "on": bool(self.voice_on.get()),
             "name": self._chosen_voice(),

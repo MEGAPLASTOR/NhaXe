@@ -6,7 +6,6 @@ Lưu trữ lượt gửi xe.
 - Thông tin: cơ sở dữ liệu SQLite data/nhaxe.db (bảng luot_gui, mỗi dòng = 1 lượt gửi)
 """
 
-import csv
 import re
 import shutil
 import sqlite3
@@ -330,19 +329,8 @@ class Storage:
         Xuất danh sách lượt gửi ra file CSV (mở được bằng Excel). Trả về đường dẫn file.
         fee_of : hàm nhận 1 lượt, trả về (tiền, tạm tính hay không) để ghi cột Tiền gửi
         """
+        from .report import csv_bytes  # report dùng record_duration của file này nên import muộn
         self.export_dir.mkdir(parents=True, exist_ok=True)
         path = self.export_dir / f"{name}_{datetime.now():%Y-%m-%d_%H-%M-%S}.csv"
-        with open(path, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.writer(f)
-            writer.writerow(["Số thẻ", "Giờ vào", "Giờ ra", "Thời gian gửi", "Trạng thái", "Tiền gửi (đ)",
-                             "Ảnh vào", "Ảnh ra"])
-            for r in rows:
-                fee = ""
-                if fee_of is not None:
-                    amount, estimate = fee_of(r)
-                    fee = f"{amount} (tạm tính)" if estimate else amount
-                writer.writerow([r["so_the"], r["gio_vao"], r["gio_ra"] or "", record_duration(r),
-                                 "Đang gửi" if r["gio_ra"] is None else "Đã ra", fee,
-                                 Path(r["anh_vao"]).name if r["anh_vao"] else "",
-                                 Path(r["anh_ra"]).name if r["anh_ra"] else ""])
+        path.write_bytes(csv_bytes(rows, fee_of))
         return path

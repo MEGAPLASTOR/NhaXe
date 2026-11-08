@@ -1,27 +1,16 @@
 """Xem chi tiết lượt gửi, danh sách xe đang gửi, lịch sử gửi xe và lịch sử theo từng ngày."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import customtkinter as ctk
 
 from ..core.pricing import money
+from ..core.report import day_status, day_summary, fee_cell, parse_day
 from ..core.storage import parse_time, record_duration, vn_time
 from .modal import ModalDialog
 from .photo_viewer import PhotoViewer
 from .theme import (C, WEEKDAYS, ImageBox, entry, font, load_image, make_tree, only_digits, open_file, pill, primary_button,
                     secondary_button, segmented, show_centered, tabview, ui_scale, zebra, brand_icon)
-
-
-def parse_day(text):
-    text = text.strip()
-    if not text:
-        return None
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(text, fmt).date()
-        except ValueError:
-            pass
-    raise ValueError(text)
 
 
 def fee_text(fee_of, rec):
@@ -416,10 +405,7 @@ class RecordsWindow(ctk.CTkToplevel):
         open_file(path.parent)
 
     def _fee_cell(self, rec):
-        if self.fee_of is None:
-            return "—"
-        amount, estimate = self.fee_of(rec)
-        return f"~ {money(amount)}" if estimate else money(amount)
+        return fee_cell(rec, self.fee_of)
 
     # ----- tab theo từng ngày -----
     def _build_daily(self, tab):
@@ -504,26 +490,12 @@ class RecordsWindow(ctk.CTkToplevel):
 
         tree = self.d_tree
         tree.delete(*tree.get_children())
-        stats = dict.fromkeys(("total", "in", "out", "stay", "money"), 0)
-        d = day.isoformat()
         for i, r in enumerate(rows):
-            entered_today = r["gio_vao"][:10] == d
-            left_today = r["gio_ra"] is not None and r["gio_ra"][:10] == d
-            if left_today:
-                status, tag = "●  Đã ra", "OUT"
-                if self.fee_of is not None:
-                    stats["money"] += self.fee_of(r)[0]
-            elif r["gio_ra"] is None and day == today:
-                status, tag = "●  Đang gửi", "IN"
-            else:
-                status, tag = "●  Gửi qua đêm", "STAY"
-            stats["total"] += 1
-            stats["in"] += entered_today
-            stats["out"] += left_today
-            stats["stay"] += not left_today
+            status, tag = day_status(r, day, today)
             tree.insert("", "end", iid=str(r["id"]), tags=(tag, *zebra(i)),
                         values=(r["so_the"], day_time(r["gio_vao"], day), day_time(r["gio_ra"], day),
-                                record_duration(r), status, self._fee_cell(r)))
+                                record_duration(r), f"●  {status}", self._fee_cell(r)))
+        stats = day_summary(rows, day, self.fee_of, today)  # cùng cách đếm với báo cáo Discord
         for key, value in stats.items():
             self.d_stats[key].configure(text=money(value) if key == "money" else str(value))
 

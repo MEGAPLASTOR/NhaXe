@@ -15,6 +15,7 @@ import ctypes
 import hashlib
 import importlib.util
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -157,9 +158,11 @@ def money_words(amount):
 
 
 def fill(template, card="", fee=None, duration=""):
-    """Thay {the}, {tien}, {thoi_gian} trong lời đọc. Dùng replace để gõ sai dấu ngoặc cũng không lỗi."""
-    text = template.replace("{the}", str(card)).replace("{thoi_gian}", duration)
-    return text.replace("{tien}", money_words(fee) if fee is not None else "")
+    """Thay {the}, {tien}, {thoi_gian} trong lời đọc. Dùng replace để gõ sai dấu ngoặc cũng không lỗi.
+    Chấp nhận cả cách gõ không gạch dưới / viết hoa ({thoigian}, {The}) vì người dùng hay gõ vậy."""
+    values = {"the": str(card), "sothe": str(card), "thoi_gian": duration, "thoigian": duration,
+              "tien": money_words(fee) if fee is not None else ""}
+    return re.sub(r"\{(\w+)\}", lambda m: values.get(m[1].lower(), m[0]), template)
 
 
 def is_vietnamese(voice):

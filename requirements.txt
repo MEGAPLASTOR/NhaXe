@@ -2,3 +2,4 @@ opencv-python
 pillow
 customtkinter
 edge-tts
+discord.py

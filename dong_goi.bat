@@ -34,6 +34,7 @@ echo [1/3] Dong goi chuong trinh chinh...
     --add-data "%ROOT%\assets;assets" ^
     --collect-data customtkinter ^
     --hidden-import edge_tts ^
+    --hidden-import discord --collect-submodules discord.app_commands ^
     --version-file "%ROOT%\cong_cu\thong_tin_phien_ban.txt" ^
     --distpath "%RA%" --workpath "%TAM%" --specpath "%ROOT%\cong_cu" ^
     "%ROOT%\QuanLyNhaXe.py" >"%TAM%_1.log" 2>&1
