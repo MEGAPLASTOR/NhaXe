@@ -10,7 +10,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .pricing import money
-from .storage import record_duration
+from .storage import format_duration, parse_time, record_duration
 
 WEEKDAYS = ("Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật")
 CSV_HEADER = ["Số thẻ", "Giờ vào", "Giờ ra", "Thời gian gửi", "Trạng thái", "Tiền gửi (đ)", "Ảnh vào", "Ảnh ra"]
@@ -61,6 +61,30 @@ def day_summary(rows, day, fee_of=None, today=None):
         if left and fee_of is not None:
             stats["money"] += fee_of(r)[0]
     return stats
+
+
+def day_card_data(rows, day, fee_of, parked_now=None, final=True, now=None):
+    """Số liệu cho ảnh thẻ thống kê 1 ngày (vẽ ở discord_card.render_day).
+    final=True: ngày đã chốt (báo cáo 00:00); False: đang tạm tính tới giờ này."""
+    now = now or datetime.now()
+    d = day.isoformat()
+    hourly_in, hourly_out = [0] * 24, [0] * 24
+    stay_seconds = []
+    for r in rows:
+        if r["gio_vao"][:10] == d:
+            hourly_in[int(r["gio_vao"][11:13])] += 1
+        if r["gio_ra"] is not None and r["gio_ra"][:10] == d:
+            hourly_out[int(r["gio_ra"][11:13])] += 1
+            stay_seconds.append((parse_time(r["gio_ra"]) - parse_time(r["gio_vao"])).total_seconds())
+    busy = [a + b for a, b in zip(hourly_in, hourly_out)]
+    peak = max(range(24), key=busy.__getitem__) if any(busy) else None
+    return {
+        "day": day, "label": day_label(day, now.date()), "final": final, "now": now,
+        "stats": day_summary(rows, day, fee_of, now.date()), "parked_now": parked_now,
+        "hourly_in": hourly_in, "hourly_out": hourly_out,
+        "peak": (peak, busy[peak]) if peak is not None else None,
+        "avg_stay": format_duration(sum(stay_seconds) / len(stay_seconds)) if stay_seconds else "—",
+    }
 
 
 def fee_cell(rec, fee_of):

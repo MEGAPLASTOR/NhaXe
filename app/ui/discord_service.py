@@ -10,13 +10,14 @@ import queue
 import threading
 import time
 from concurrent.futures import Future
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 from ..core.discord_bot import DiscordBot, Queries
-from ..core.discord_hook import csv_name, day_embed, days_to_report, post, valid_webhook
+from ..core.discord_card import render_day
+from ..core.discord_hook import days_to_report, png_name, post, valid_webhook
 from ..core.errors import log_error
-from ..core.report import csv_bytes, day_summary
+from ..core.report import day_card_data, day_label
 
 PUMP_MS = 150           # luồng giao diện kiểm tra hàng đợi việc của luồng nền
 CHECK_MS = 30 * 1000    # kiểm tra đã tới giờ gửi báo cáo chưa
@@ -125,25 +126,28 @@ class DiscordService:
             except Exception:
                 pass
 
-    def _payload(self, day, title=None):
-        """Nội dung báo cáo 1 ngày: (chữ, khung thống kê, file CSV). Chạy trên luồng giao diện."""
+    def _payload(self, day, content=None):
+        """Nội dung báo cáo 1 ngày: (chữ, số liệu để vẽ ảnh thẻ). Chạy trên luồng giao diện;
+        ảnh vẽ sau ở luồng nền để màn hình không khựng. Chỉ gửi ảnh, không kèm file danh sách."""
         rows = self.storage.day_records(day)
-        stats = day_summary(rows, day, self.fee_of)
-        embed = day_embed(day, stats, self.storage.stats()["parked"], title)
-        files = [(csv_name(day), csv_bytes(rows, self.fee_of))] if rows else []
-        return f"Báo cáo nhà xe — {datetime.now():%H:%M %d/%m/%Y}", embed, files
+        data = day_card_data(rows, day, self.fee_of, self.storage.stats()["parked"], final=day < date.today())
+        return content or f"📊 **Báo cáo nhà xe — {day_label(day)}**", data
 
     def _send(self, payloads, url, days):
         self._sending = True
 
         def work():
             sent, error = [], None
-            for (content, embed, files), day in zip(payloads, days):
+            for (content, data), day in zip(payloads, days):
                 try:
-                    post(url, content, [embed], files)
+                    post(url, content, files=[(png_name(day), render_day(data))])
                     sent.append(day)
                 except RuntimeError as exc:
                     error = str(exc)
+                    break
+                except Exception as exc:  # lỗi vẽ ảnh...: ghi lại, không để luồng chết mà kẹt cờ đang gửi
+                    log_error(type(exc), exc, exc.__traceback__)
+                    error = "lỗi tạo báo cáo (chi tiết trong data/loi.log)"
                     break
             self.run_on_ui(lambda: self._sent(sent, error))
 
@@ -165,14 +169,18 @@ class DiscordService:
         if not valid_webhook(url):
             done(False, "Địa chỉ webhook không đúng dạng https://discord.com/api/webhooks/...")
             return
-        content, embed, files = self._payload(date.today(), "🧪 Gửi thử — thống kê hôm nay tới giờ này")
+        today = date.today()
+        content, data = self._payload(today, "🧪 **Gửi thử** — thống kê hôm nay tới giờ này")
 
         def work():
             try:
-                post(url, content, [embed], files)
+                post(url, content, files=[(png_name(today), render_day(data))])
                 result = (True, "Đã gửi thử — xem tin nhắn trong kênh Discord")
             except RuntimeError as exc:
                 result = (False, str(exc))
+            except Exception as exc:
+                log_error(type(exc), exc, exc.__traceback__)
+                result = (False, "Lỗi tạo báo cáo — chi tiết trong data/loi.log")
             self.run_on_ui(lambda: done(*result))
 
         threading.Thread(target=work, name="discord-test", daemon=True).start()

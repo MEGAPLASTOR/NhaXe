@@ -41,7 +41,32 @@ HEADER = """\
 ; [discord]    : bat = 1 / 0 gửi thống kê lúc 00:00 qua webhook (địa chỉ webhook của kênh Discord),
 ;               bot = 1 / 0 cho tra cứu bằng lệnh /thongke /lichsu /tracuu /danggui (cần bot_token),
 ;               kenh = ID kênh được phép tra cứu (trống = mọi kênh)
+;               ô để trống = dùng webhook / token mặc định gắn sẵn trong phần mềm (assets/mac_dinh.ini)
 """
+
+
+DISCORD_KEYS = (("on", "bat"), ("webhook", "webhook"), ("bot_on", "bot"), ("bot_token", "bot_token"),
+                ("channel", "kenh"))
+
+
+def _discord_from(cfg, fallback):
+    """Đọc mục [discord]. Ô trống hoặc không có thì lấy giá trị trong fallback."""
+    out = {}
+    for key, option in DISCORD_KEYS:
+        raw = cfg.get("discord", option, fallback="").strip()
+        if key in ("on", "bot_on"):
+            out[key] = (raw == "1") if raw else fallback[key]
+        else:
+            out[key] = raw or fallback[key]
+    return out
+
+
+def discord_defaults():
+    """Webhook / token Discord gắn sẵn trong phần mềm (file assets/mac_dinh.ini đóng gói cùng exe).
+    Không có file thì mọi thứ trống / tắt."""
+    from ..paths import DEFAULTS_FILE  # paths import muộn để file này vẫn dùng được độc lập
+    empty = {"on": False, "webhook": "", "bot_on": False, "bot_token": "", "channel": ""}
+    return _discord_from(_read(DEFAULTS_FILE), empty) if DEFAULTS_FILE.is_file() else empty
 
 
 def hash_password(password):
@@ -100,13 +125,7 @@ def load_settings(path):
         "say_in": cfg.get("giong_noi", "loi_vao", fallback=DEFAULT_SAY_IN).strip(),
         "say_out": cfg.get("giong_noi", "loi_ra", fallback=DEFAULT_SAY_OUT).strip(),
     }
-    discord = {
-        "on": cfg.get("discord", "bat", fallback="0").strip() == "1",
-        "webhook": cfg.get("discord", "webhook", fallback="").strip(),
-        "bot_on": cfg.get("discord", "bot", fallback="0").strip() == "1",
-        "bot_token": cfg.get("discord", "bot_token", fallback="").strip(),
-        "channel": cfg.get("discord", "kenh", fallback="").strip(),
-    }
+    discord = _discord_from(cfg, discord_defaults())   # cài ở máy nào cũng có webhook / bot mặc định
     return {"keys": keys, "cameras": cameras, "keep_days": keep_days, "prices": prices,
             "pass_hash": pass_hash, "scale": scale, "voice": voice, "discord": discord}
 
@@ -146,13 +165,15 @@ def save_settings(path, settings):
     lines.append(f"loi_vao = {_one_line(voice['say_in'])}")
     lines.append(f"loi_ra = {_one_line(voice['say_out'])}")
     lines.append("")
-    dc = settings["discord"]
+    dc, default = settings["discord"], discord_defaults()
+    # giá trị trùng mặc định thì để trống: config.ini không chứa token, và khi đổi bản mặc định thì tự theo
+    same = lambda key: dc[key] if dc[key] != default[key] else ""
     lines.append("[discord]")
     lines.append(f"bat = {1 if dc['on'] else 0}")
-    lines.append(f"webhook = {dc['webhook']}")
+    lines.append(f"webhook = {same('webhook')}")
     lines.append(f"bot = {1 if dc['bot_on'] else 0}")
-    lines.append(f"bot_token = {dc['bot_token']}")
-    lines.append(f"kenh = {dc['channel']}")
+    lines.append(f"bot_token = {same('bot_token')}")
+    lines.append(f"kenh = {same('channel')}")
     lines.append("")
     lines.append("[bao_mat]")
     lines.append(f"mat_khau_cai_dat = {settings['pass_hash']}")

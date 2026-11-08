@@ -1,7 +1,7 @@
 """
 Bot Discord để tra cứu nhà xe ngay trong Discord bằng lệnh gạch chéo:
 
-  /thongke [ngay]          thống kê 1 ngày (mặc định hôm nay) + file CSV danh sách xe
+  /thongke [ngay]          thống kê 1 ngày (mặc định hôm nay)
   /lichsu  [ngay]          danh sách từng lượt xe trong ngày
   /tracuu  the [so_luot]   lịch sử của 1 số thẻ, kèm ảnh vào / ra của lượt gần nhất
   /danggui                 các xe đang gửi trong bãi
@@ -17,17 +17,23 @@ import asyncio
 import io
 import re
 import threading
-from datetime import date, timedelta
-from pathlib import Path
+from collections import namedtuple
+from datetime import date, datetime, timedelta
 
-from .discord_hook import COLOR, csv_name, day_embed
+from . import discord_card as card_ui
+from .errors import log_error
 from .pricing import money
-from .report import csv_bytes, day_label, day_status, day_summary, parse_day
+from .report import day_card_data, day_label, day_status, day_summary, parse_day
 from .storage import record_duration, vn_time
 
 UI_TIMEOUT = 15          # giây chờ luồng giao diện trả kết quả
-LIST_LIMIT = 40          # số dòng tối đa hiện trong tin nhắn, còn lại xem file CSV
+LIST_LIMIT = 20          # số dòng tối đa vẽ trong ảnh, còn lại xem trong phần mềm (F4)
 DAY_MONTH = re.compile(r"^(\d{1,2})[/-](\d{1,2})$")
+STATUS_COLOR = {"IN": card_ui.GREEN, "STAY": card_ui.PURPLE, "OUT": card_ui.ORANGE}
+LIST_COLUMNS = [("Thẻ", 40), ("Vào", 170), ("Ra", 370), ("Đã gửi", 570), ("Tiền", 830)]
+
+# Câu trả lời của bot: chữ ngắn + ảnh thẻ (vẽ ở luồng nền bằng render(data)) + file đính kèm khác
+Reply = namedtuple("Reply", "content render data image_name files")
 
 
 def parse_day_arg(text, today=None):
@@ -53,79 +59,78 @@ def _short(ts, day=None):
     return f"{ts[11:16]} {ts[8:10]}/{ts[5:7]}"
 
 
-def _line(r, day=None):
-    """1 dòng của bảng lượt gửi (chữ đều cột trong khung code)."""
-    return f"{r['so_the']:>6}  {_short(r['gio_vao'], day):<11} {_short(r['gio_ra'], day):<11} {record_duration(r)}"
-
-
-def _table(lines, more=0):
-    body = "\n".join(["  Thẻ  Vào         Ra          Đã gửi", *lines]) if lines else "(không có lượt nào)"
-    text = f"```\n{body}\n```"
-    if more:
-        text += f"\n… còn **{more}** lượt nữa, xem trong file CSV đính kèm."
-    return text
-
-
 class Queries:
-    """Các câu tra cứu bot dùng. Chạy trên luồng giao diện (gọi qua run_on_ui), trả về dữ liệu thuần."""
+    """Các câu tra cứu bot dùng. Chạy trên luồng giao diện (gọi qua run_on_ui), trả về dữ liệu thuần (Reply)."""
 
     def __init__(self, storage, fee_of):
         self.storage = storage
         self.fee_of = fee_of
 
+    def _fee_text(self, r):
+        amount, estimate = self.fee_of(r)
+        return f"~ {money(amount)}" if estimate else money(amount)
+
+    def _row(self, r, day, tag):
+        return (r["so_the"], _short(r["gio_vao"], day), _short(r["gio_ra"], day), record_duration(r),
+                self._fee_text(r), STATUS_COLOR[tag])
+
     def day_report(self, day):
+        today = date.today()
         rows = self.storage.day_records(day)
-        stats = day_summary(rows, day, self.fee_of)
-        parked = self.storage.stats()["parked"] if day == date.today() else None
-        embed = day_embed(day, stats, parked, title=f"📊 Thống kê {day_label(day)}")
-        return embed, (csv_name(day), csv_bytes(rows, self.fee_of)) if rows else None
+        parked = self.storage.stats()["parked"] if day == today else None
+        data = day_card_data(rows, day, self.fee_of, parked, final=day < today)
+        return Reply(f"📊 Thống kê nhà xe — {day_label(day)}", card_ui.render_day, data,
+                     f"thong_ke_{day:%d-%m-%Y}.png", [])
 
     def day_list(self, day):
         rows = self.storage.day_records(day)
         stats = day_summary(rows, day, self.fee_of)
-        groups = {"OUT": [], "IN": [], "STAY": []}
+        groups = {"IN": [], "STAY": [], "OUT": []}
         for r in rows:
-            groups[day_status(r, day)[1]].append(_line(r, day))
-        shown, lines = 0, []
-        for tag, title in (("IN", "Đang gửi"), ("STAY", "Gửi qua đêm"), ("OUT", "Đã ra")):
-            if groups[tag] and shown < LIST_LIMIT:
-                lines.append(f"— {title} ({len(groups[tag])}) —")
-                take = groups[tag][:LIST_LIMIT - shown]
-                lines += take
-                shown += len(take)
-        embed = {"title": f"📋 Lịch sử {day_label(day)}", "color": COLOR,
-                 "description": _table(lines, len(rows) - shown),
-                 "footer": {"text": f"{stats['total']} xe · vào {stats['in']} · ra {stats['out']} · "
-                                    f"thu {money(stats['money'])}"}}
-        return embed, (csv_name(day), csv_bytes(rows, self.fee_of)) if rows else None
+            groups[day_status(r, day)[1]].append(r)
+        ordered = [(r, tag) for tag in ("IN", "STAY", "OUT") for r in groups[tag]]
+        data = {"kicker": "LỊCH SỬ NHÀ XE", "title": day_label(day),
+                "subtitle": f"{stats['total']} xe · vào {stats['in']} · ra {stats['out']} · thu {money(stats['money'])}",
+                "chips": [(f"Đang gửi {len(groups['IN'])}", card_ui.GREEN),
+                          (f"Qua đêm {len(groups['STAY'])}", card_ui.PURPLE),
+                          (f"Đã ra {len(groups['OUT'])}", card_ui.ORANGE)],
+                "columns": LIST_COLUMNS, "table_title": "Từng lượt xe",
+                "rows": [self._row(r, day, tag) for r, tag in ordered[:LIST_LIMIT]],
+                "more": max(0, len(rows) - LIST_LIMIT), "footer": f"Tạo lúc {datetime.now():%H:%M  %d/%m/%Y}"}
+        return Reply(f"📋 Lịch sử nhà xe — {day_label(day)}", card_ui.render_list, data,
+                     f"lich_su_{day:%d-%m-%Y}.png", [])
 
     def card_history(self, card, count):
-        rows = self.storage.search(card=card, limit=200)
-        rows = [r for r in rows if r["so_the"] == card][:count]   # search tìm theo 1 phần số thẻ
+        rows = self.storage.search(card=card, limit=500)
+        rows = [r for r in rows if r["so_the"] == card]   # search tìm theo 1 phần số thẻ
         if not rows:
-            return {"title": f"🔎 Thẻ {card}", "color": COLOR, "description": "Chưa có lượt gửi nào với thẻ này."}, []
-        lines = []
-        for r in rows:
-            amount, estimate = self.fee_of(r)
-            state = "ĐANG GỬI" if r["gio_ra"] is None else "đã ra"
-            lines.append(f"**{vn_time(r['gio_vao'])}** → {vn_time(r['gio_ra']) if r['gio_ra'] else '—'}\n"
-                         f"　{record_duration(r)} · {money(amount)}{' (tạm tính)' if estimate else ''} · {state}")
+            return Reply(f"🔎 Thẻ **{card}** chưa có lượt gửi nào.", None, None, None, [])
         latest = rows[0]
-        photos = [(f"the{card}_vao.jpg", self.storage.abs_path(latest["anh_vao"])) if latest["anh_vao"] else None,
-                  (f"the{card}_ra.jpg", self.storage.abs_path(latest["anh_ra"])) if latest["anh_ra"] else None]
-        embed = {"title": f"🔎 Thẻ {card} — {len(rows)} lượt gần nhất", "color": COLOR,
-                 "description": "\n".join(lines)[:4000],
-                 "footer": {"text": "Ảnh đính kèm là ảnh vào / ra của lượt gần nhất"}}
-        return embed, [(name, str(path)) for name, path in filter(None, photos) if Path(path).is_file()]
+        amount, estimate = self.fee_of(latest)
+        photo = lambda rel: str(self.storage.abs_path(rel)) if rel else None
+        t_in, t_out = latest["gio_vao"][11:16], latest["gio_ra"][11:16] if latest["gio_ra"] else None
+        data = {
+            "card": card, "total": len(rows),
+            "latest": {"vao": vn_time(latest["gio_vao"]), "ra": vn_time(latest["gio_ra"]) if latest["gio_ra"] else "Chưa ra",
+                       "duration": record_duration(latest), "fee": amount, "estimate": estimate,
+                       "parked": latest["gio_ra"] is None},
+            "photos": [(f"↓  Ảnh lúc vào · {t_in}", photo(latest["anh_vao"])),
+                       ("↑  Ảnh lúc ra" + (f" · {t_out}" if t_out else ""), photo(latest["anh_ra"]))],
+            "history": [(_short(r["gio_vao"]), _short(r["gio_ra"]) if r["gio_ra"] else "Đang gửi", record_duration(r),
+                         self._fee_text(r), r["gio_ra"] is None) for r in rows[1:count + 1]],
+        }
+        return Reply(f"🔎 Tra cứu thẻ **{card}**", card_ui.render_card, data, f"the_{card}.png", [])
 
     def parked(self):
         rows = self.storage.list_parked()
-        lines = [_line(r) for r in rows[:LIST_LIMIT]]
         total = sum(self.fee_of(r)[0] for r in rows)
-        embed = {"title": f"🅿️ Đang gửi: {len(rows)} xe", "color": COLOR,
-                 "description": _table(lines, max(0, len(rows) - LIST_LIMIT)),
-                 "footer": {"text": f"Tiền tạm tính nếu tất cả ra bây giờ: {money(total)}"}}
-        return embed, ("xe_dang_gui.csv", csv_bytes(rows, self.fee_of)) if len(rows) > LIST_LIMIT else None
+        data = {"kicker": "XE ĐANG GỬI", "title": f"{len(rows)} xe trong bãi", "icon": card_ui.icon_parking,
+                "subtitle": f"Tiền tạm tính nếu tất cả ra bây giờ: {money(total)}",
+                "chips": [(f"Cập nhật {datetime.now():%H:%M}", card_ui.GREEN)],
+                "columns": LIST_COLUMNS, "table_title": "Xe đang gửi",
+                "rows": [self._row(r, None, "IN") for r in rows[:LIST_LIMIT]],
+                "more": max(0, len(rows) - LIST_LIMIT), "footer": f"Tạo lúc {datetime.now():%H:%M  %d/%m/%Y}"}
+        return Reply("🅿️ Xe đang gửi trong bãi", card_ui.render_list, data, "xe_dang_gui.png", [])
 
 
 class DiscordBot:
@@ -179,8 +184,14 @@ class DiscordBot:
         tree = app_commands.CommandTree(client)
         q = self.queries
 
-        def to_files(attachment):
-            return [discord.File(io.BytesIO(data), filename=name) for name, data in attachment]
+        async def send(inter, reply):
+            """Vẽ ảnh thẻ ở luồng phụ (không chặn bot) rồi gửi kèm các file khác."""
+            files = []
+            if reply.render is not None:
+                png = await asyncio.to_thread(reply.render, reply.data)
+                files.append(discord.File(io.BytesIO(png), filename=reply.image_name))
+            files += [discord.File(io.BytesIO(data), filename=name) for name, data in reply.files]
+            await inter.followup.send(reply.content, files=files)
 
         async def guard(inter):
             """Chỉ trả lời trong kênh đã chọn (nếu có)."""
@@ -201,25 +212,20 @@ class DiscordBot:
                 return None
             return day
 
-        async def reply(inter, embed, files=()):
-            await inter.followup.send(embed=discord.Embed.from_dict(embed), files=list(files))
-
         @tree.command(name="thongke", description="Thống kê xe vào / ra và tiền thu của 1 ngày")
         @app_commands.describe(ngay="Ngày cần xem, vd 31/10/2026 hoặc hôm qua (để trống = hôm nay)")
         async def thongke(inter: discord.Interaction, ngay: str = ""):
             if await guard(inter) and (day := await day_arg(inter, ngay)):
-                embed, csv = await self._ask(lambda: q.day_report(day))
-                await reply(inter, embed, to_files([csv] if csv else []))
+                await send(inter, await self._ask(lambda: q.day_report(day)))
 
         @tree.command(name="lichsu", description="Danh sách từng lượt xe trong 1 ngày")
         @app_commands.describe(ngay="Ngày cần xem, vd 31/10/2026 hoặc hôm qua (để trống = hôm nay)")
         async def lichsu(inter: discord.Interaction, ngay: str = ""):
             if await guard(inter) and (day := await day_arg(inter, ngay)):
-                embed, csv = await self._ask(lambda: q.day_list(day))
-                await reply(inter, embed, to_files([csv] if csv else []))
+                await send(inter, await self._ask(lambda: q.day_list(day)))
 
         @tree.command(name="tracuu", description="Lịch sử gửi xe của 1 số thẻ, kèm ảnh lượt gần nhất")
-        @app_commands.describe(the="Số thẻ", so_luot="Số lượt gần nhất muốn xem (mặc định 5)")
+        @app_commands.describe(the="Số thẻ", so_luot="Số lượt trước đó muốn xem (mặc định 5)")
         async def tracuu(inter: discord.Interaction, the: str, so_luot: app_commands.Range[int, 1, 20] = 5):
             if not await guard(inter):
                 return
@@ -227,17 +233,16 @@ class DiscordBot:
             if not card.isdigit():
                 await inter.followup.send("Số thẻ chỉ gồm chữ số.")
                 return
-            embed, photos = await self._ask(lambda: q.card_history(card, so_luot))
-            await reply(inter, embed, [discord.File(path, filename=name) for name, path in photos])
+            await send(inter, await self._ask(lambda: q.card_history(card, so_luot)))
 
         @tree.command(name="danggui", description="Các xe đang gửi trong bãi")
         async def danggui(inter: discord.Interaction):
             if await guard(inter):
-                embed, csv = await self._ask(q.parked)
-                await reply(inter, embed, to_files([csv] if csv else []))
+                await send(inter, await self._ask(q.parked))
 
         @tree.error
         async def on_error(inter, error):
+            log_error(type(error), error, error.__traceback__)
             text = "Tra cứu không thành công, thử lại sau."
             try:
                 if inter.response.is_done():

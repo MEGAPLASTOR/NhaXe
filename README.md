@@ -9,9 +9,10 @@ Phần mềm ghi nhận xe vào / ra bằng 2 camera Imou (cổng vào, cổng r
 | File | Làm gì |
 |---|---|
 | `ban_phat_hanh\CaiDat_QuanLyNhaXe.exe` | **Bộ cài đặt** — đưa cho khách file này |
+| `ban_phat_hanh\CapNhat_QuanLyNhaXe.exe` | **Bản cập nhật** — gửi cho máy đang dùng bản cũ, giữ nguyên dữ liệu |
 | `ban_phat_hanh\QuanLyNhaXe.exe` | Bản chạy thẳng, không cài (chép vào USB mang đi) |
 | `run.bat` | Chạy từ mã nguồn (để sửa code). Lần đầu tự cài Python và thư viện. |
-| `dong_goi.bat` | Đóng gói lại cả 2 file trên sau khi sửa code |
+| `dong_goi.bat` | Đóng gói lại cả 3 file trên sau khi sửa code |
 | `tao_shortcut.bat` | Tạo shortcut cho bản chạy từ mã nguồn |
 
 ### Bộ cài đặt
@@ -25,6 +26,21 @@ Chạy `CaiDat_QuanLyNhaXe.exe`, các bước:
 
 Không cần quyền Administrator. Cài đặt và dữ liệu nằm trong thư mục cài, nên **đừng chọn
 `C:\Program Files`** (Windows chặn ghi dữ liệu vào đó).
+
+### Cập nhật máy đang dùng bản cũ
+Gửi file `CapNhat_QuanLyNhaXe.exe` (mã nguồn: `cong_cu/cap_nhat.py`), chạy rồi bấm **Cập nhật**:
+
+1. Tự tìm thư mục đã cài (Apps & features → bản đang chạy → `C:\QuanLyNhaXe`); không thấy thì bấm **Chọn...**
+   (bản chạy thẳng `QuanLyNhaXe.exe` cũng cập nhật được, chỉ cần chọn đúng thư mục).
+2. Phần mềm đang mở thì hỏi rồi tự đóng (nhờ phần mềm tự tắt trước, quá 12 giây mới buộc tắt).
+3. Sao lưu `config.ini` vào `data/sao_luu/truoc_cap_nhat_<ngày giờ>/`, thay `QuanLyNhaXe.exe`
+   (chép ra file tạm rồi đổi tên, hỏng giữa chừng thì bản cũ vẫn còn), thư mục `giong_doc`, `GoCaiDat.exe`,
+   sửa số phiên bản trong Apps & features.
+4. **Giữ nguyên** thư mục `data` (xe, ảnh, tiền) và `config.ini` (mật khẩu, camera, giá, lời đọc).
+   Webhook / bot Discord mặc định nằm sẵn trong chương trình mới nên có ngay sau khi cập nhật.
+
+Nâng phiên bản thì sửa cả `app/__init__.py`, `cong_cu/trinh_cai_dat.py` và 3 file
+`cong_cu/thong_tin_*.txt` (phiên bản, bộ cài, bản cập nhật).
 
 ### Gỡ cài đặt
 Settings → Apps → **Quản Lý Nhà Xe** → Uninstall, hoặc chạy `GoCaiDat.exe` trong thư mục cài.
@@ -127,8 +143,8 @@ Cài trong **⚙ Cài đặt → Discord**, có 2 phần độc lập:
 
 **1. Báo cáo hằng ngày qua webhook** (chỉ gửi một chiều). Lấy webhook: chuột phải kênh → Chỉnh sửa kênh →
 Tích hợp → Webhook → Webhook mới → Sao chép URL webhook, dán vào ô **Địa chỉ webhook**, bấm **Gửi thử**.
-Đúng 00:00 mỗi ngày phần mềm gửi thống kê ngày vừa qua (xe trong ngày, vào, ra, còn trong bãi, tiền thu,
-đang gửi) kèm file CSV danh sách xe. Máy tắt lúc 00:00 thì lần mở sau gửi bù (tối đa 7 ngày);
+Đúng 00:00 mỗi ngày phần mềm gửi ảnh thẻ thống kê ngày vừa qua (xe trong ngày, vào, ra, còn trong bãi,
+tiền thu, đang gửi), không kèm file danh sách. Máy tắt lúc 00:00 thì lần mở sau gửi bù (tối đa 7 ngày);
 mất mạng thì 5 phút sau thử lại. Ngày đã gửi ghi trong `data/discord.json`.
 
 **2. Tra cứu bằng bot** (thư viện `discord.py`). Tạo bot: [discord.com/developers](https://discord.com/developers/applications)
@@ -138,13 +154,24 @@ tích `bot` và `applications.commands`, quyền Send Messages / Embed Links / A
 
 | Lệnh | Trả về |
 |---|---|
-| `/thongke [ngay]` | Thống kê 1 ngày (mặc định hôm nay) + file CSV. Ngày gõ `31/10/2026`, `31/10`, `hôm qua` |
+| `/thongke [ngay]` | Thống kê 1 ngày (mặc định hôm nay). Ngày gõ `31/10/2026`, `31/10`, `hôm qua` |
 | `/lichsu [ngay]` | Danh sách từng lượt trong ngày (đang gửi / gửi qua đêm / đã ra) |
 | `/tracuu the [so_luot]` | Các lượt gần nhất của 1 số thẻ + ảnh vào / ra của lượt mới nhất |
 | `/danggui` | Các xe đang gửi trong bãi |
 
-Bot chỉ chạy khi phần mềm đang mở và máy có mạng. Webhook và token nằm trong `config.ini`,
-đừng đưa file này cho người lạ.
+Báo cáo và câu trả lời của bot là **ảnh thẻ thống kê** nền tối (vẽ bằng Pillow trong `app/core/discord_card.py`):
+thẻ ngày có tiền thu, xe vào / ra, biểu đồ xe theo giờ, bãi xe, giờ cao điểm; thẻ tra cứu có ảnh camera
+lượt gần nhất; thẻ danh sách cho `/lichsu` và `/danggui` (tối đa 20 dòng, còn lại xem trong phần mềm bằng F4). Tin nhắn Discord chỉ có ảnh, không kèm file.
+
+Bot chỉ chạy khi phần mềm đang mở và máy có mạng.
+
+**Webhook / token mặc định gắn sẵn:** file `assets/mac_dinh.ini` (mục `[discord]`, cùng dạng với `config.ini`)
+được đóng gói vào exe, nên cài ở máy nào cũng tự có webhook và bot. Ô nào trong `config.ini` để trống thì dùng
+giá trị mặc định; lưu mà trùng mặc định thì `config.ini` không ghi lại token. File này nằm trong `.gitignore`,
+**không đưa lên git**. Muốn đổi bản mặc định: sửa file đó rồi chạy lại `dong_goi.bat`.
+Tab Discord khóa sẵn (che địa chỉ webhook), bấm **Mở khóa để thay đổi** mới sửa được; có nút **Khôi phục mặc định**.
+Lưu ý: ai có file exe đều có thể lấy được token / webhook bên trong — đừng phát exe cho người lạ; lộ thì
+Reset Token bot, tạo webhook mới, sửa `assets/mac_dinh.ini` và đóng gói lại.
 
 ### Tính tiền gửi xe
 Có 2 khung giờ, mỗi khung có giờ bắt đầu, giờ kết thúc và giá 1 lượt (mặc định Ban ngày 06:00–18:00, Ban đêm 18:00–06:00).

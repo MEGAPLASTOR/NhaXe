@@ -23,5 +23,6 @@ DATA_DIR = BASE_DIR / "data"
 LOGO_FILE = ASSETS_DIR / "logo.png"
 LOGO_MARK_FILE = ASSETS_DIR / "logo_mark.png"
 ICON_FILE = ASSETS_DIR / "app.ico"
+DEFAULTS_FILE = ASSETS_DIR / "mac_dinh.ini"  # webhook / token Discord gắn sẵn (đóng gói vào exe, không đưa lên git)
 VOICE_DIR = BASE_DIR / "giong_doc"          # chương trình đọc Piper + giọng Tiếng Việt (nằm cạnh file exe)
 SOUND_CACHE_DIR = DATA_DIR / "am_thanh"     # câu đọc đã tạo sẵn

@@ -2,7 +2,7 @@
 Gửi báo cáo lên Discord qua webhook (chỉ gửi một chiều, không cần thư viện thêm).
 
 Tạo webhook: Discord -> chuột phải kênh -> Chỉnh sửa kênh -> Tích hợp -> Webhook -> Webhook mới -> Sao chép URL.
-Mỗi ngày lúc 00:00 phần mềm gửi thống kê của ngày vừa qua kèm file CSV (Excel) danh sách xe ngày đó.
+Mỗi ngày lúc 00:00 phần mềm gửi ảnh thẻ thống kê của ngày vừa qua.
 Máy tắt lúc 00:00 thì lần mở sau gửi bù (tối đa 7 ngày gần nhất).
 """
 
@@ -14,12 +14,9 @@ import uuid
 from datetime import date
 
 from .. import APP_NAME, COMPANY, VERSION
-from .pricing import money
-from .report import WEEKDAYS
 
 WEBHOOK_RE = re.compile(r"^https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+/?$")
 USER_AGENT = f"QuanLyNhaXe/{VERSION} (VIDATEX JSC)"   # Discord chặn User-Agent mặc định của Python
-COLOR = 0x256FA6        # xanh logo VIDATEX
 CATCH_UP_DAYS = 7       # máy tắt nhiều ngày thì chỉ gửi bù tối đa chừng này ngày
 
 
@@ -27,27 +24,8 @@ def valid_webhook(url):
     return bool(WEBHOOK_RE.match(url.strip()))
 
 
-def day_embed(day, stats, parked_now=None, title=None):
-    """Khung thống kê 1 ngày (dạng embed của Discord). parked_now: số xe đang gửi lúc gửi báo cáo."""
-    fields = [
-        {"name": "🚗 Xe trong ngày", "value": f"**{stats['total']}**", "inline": True},
-        {"name": "⬇️ Xe vào", "value": f"**{stats['in']}**", "inline": True},
-        {"name": "⬆️ Xe ra", "value": f"**{stats['out']}**", "inline": True},
-        {"name": "🅿️ Còn trong bãi cuối ngày", "value": f"**{stats['stay']}**", "inline": True},
-        {"name": "💰 Tiền thu (xe đã ra)", "value": f"**{money(stats['money'])}**", "inline": True},
-    ]
-    if parked_now is not None:
-        fields.append({"name": "🕒 Đang gửi hiện tại", "value": f"**{parked_now}**", "inline": True})
-    return {
-        "title": title or f"📊 Thống kê {WEEKDAYS[day.weekday()]}, {day:%d/%m/%Y}",
-        "color": COLOR,
-        "fields": fields,
-        "footer": {"text": f"{APP_NAME} · {COMPANY} · v{VERSION}"},
-    }
-
-
-def csv_name(day):
-    return f"nha_xe_{day:%d-%m-%Y}.csv"
+def png_name(day):
+    return f"thong_ke_{day:%d-%m-%Y}.png"
 
 
 def post(url, content="", embeds=(), files=(), timeout=20):

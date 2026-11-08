@@ -27,7 +27,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [1/3] Dong goi chuong trinh chinh...
+echo [1/4] Dong goi chuong trinh chinh...
 "%PY%" -m PyInstaller --noconfirm --clean --onefile --windowed ^
     --name QuanLyNhaXe ^
     --icon "%ROOT%\assets\app.ico" ^
@@ -42,7 +42,7 @@ if errorlevel 1 goto :loi_log
 rem giong doc Piper (~100 MB) de thanh thu muc rieng canh exe, khong nhet vao exe cho khoi mo cham
 if exist "%ROOT%\giong_doc" xcopy /e /i /y /q "%ROOT%\giong_doc" "%RA%\giong_doc" >nul
 
-echo [2/3] Dong goi trinh go cai dat...
+echo [2/4] Dong goi trinh go cai dat...
 "%PY%" -m PyInstaller --noconfirm --clean --onefile --windowed ^
     --name GoCaiDat ^
     --icon "%ROOT%\assets\app.ico" ^
@@ -55,7 +55,7 @@ echo [2/3] Dong goi trinh go cai dat...
     "%ROOT%\cong_cu\trinh_cai_dat.py" >"%TAM%_2.log" 2>&1
 if errorlevel 1 goto :loi_log
 
-echo [3/3] Dong goi bo cai dat...
+echo [3/4] Dong goi bo cai dat...
 "%PY%" -m PyInstaller --noconfirm --clean --onefile --windowed ^
     --name CaiDat_QuanLyNhaXe ^
     --icon "%ROOT%\assets\app.ico" ^
@@ -71,9 +71,26 @@ echo [3/3] Dong goi bo cai dat...
     "%ROOT%\cong_cu\trinh_cai_dat.py" >"%TAM%_3.log" 2>&1
 if errorlevel 1 goto :loi_log
 
+echo [4/4] Dong goi ban cap nhat...
+"%PY%" -m PyInstaller --noconfirm --clean --onefile --windowed ^
+    --name CapNhat_QuanLyNhaXe ^
+    --icon "%ROOT%\assets\app.ico" ^
+    --paths "%ROOT%\cong_cu" ^
+    --add-data "%RA%\QuanLyNhaXe.exe;." ^
+    --add-data "%ROOT%\giong_doc;giong_doc" ^
+    --add-data "%TAM%\go\GoCaiDat.exe;." ^
+    --add-data "%ROOT%\assets\app.ico;." ^
+    --add-data "%ROOT%\assets\logo_mark.png;." ^
+    --collect-data customtkinter ^
+    --exclude-module cv2 --exclude-module numpy ^
+    --version-file "%ROOT%\cong_cu\thong_tin_cap_nhat.txt" ^
+    --distpath "%RA%" --workpath "%TAM%" --specpath "%ROOT%\cong_cu" ^
+    "%ROOT%\cong_cu\cap_nhat.py" >"%TAM%_4.log" 2>&1
+if errorlevel 1 goto :loi_log
+
 echo.
 echo ===================================================
-echo  XONG! Hai file trong thu muc ban_phat_hanh:
+echo  XONG! Cac file trong thu muc ban_phat_hanh:
 echo.
 echo   CaiDat_QuanLyNhaXe.exe   ^<- GUI CHO KHACH FILE NAY
 echo        bo cai dat: chon thu muc, tao shortcut,
@@ -81,6 +98,10 @@ echo        go duoc trong Apps and features
 echo.
 echo   QuanLyNhaXe.exe          ^<- ban chay truc tiep, khong can cai
 echo        (chep kem thu muc giong_doc de co giong doc khi mat mang)
+echo.
+echo   CapNhat_QuanLyNhaXe.exe  ^<- GUI MAY DANG DUNG BAN CU
+echo        tu tim cho da cai, thay chuong trinh moi,
+echo        giu nguyen du lieu xe va cai dat
 echo ===================================================
 echo.
 choice /c YN /m "Mo thu muc ban_phat_hanh"

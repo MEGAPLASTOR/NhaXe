@@ -12,7 +12,7 @@ from ..core.keys import (ACTION_TITLES, ACTIONS, COMBO_MODIFIERS, DEFAULT_KEYS, 
                          key_name, keys_text)
 from ..core.pricing import fee_detail, detail_text, money, parse_hm, parse_money
 from ..core.discord_hook import valid_webhook
-from ..core.settings import check_password, hash_password
+from ..core.settings import check_password, discord_defaults, hash_password
 from ..core.speech import (AUTO_VOICE, DEFAULT_SAY_IN, DEFAULT_SAY_OUT, INSTALL_DENIED, INSTALL_MISSING, INSTALL_OK,
                            PLACEHOLDERS, WIN_PREFIX, fill, install_vietnamese_voice)
 from .password_dialog import ChangePasswordDialog
@@ -516,8 +516,17 @@ class SettingsWindow(ctk.CTkToplevel):
     # ================= Discord =================
     def _build_discord(self, tab):
         dc = self.settings["discord"]
+        # thanh khóa: webhook / token gắn sẵn trong phần mềm, phải bấm mở khóa mới sửa được
+        bar = ctk.CTkFrame(tab, fg_color="transparent")
+        bar.pack(fill="x", padx=10, pady=(8, 0))
+        self.dc_lock_note = ctk.CTkLabel(bar, text="", font=font(13, True), anchor="w")
+        self.dc_lock_note.pack(side="left")
+        self.dc_lock_btn = secondary_button(bar, "", self._toggle_discord_lock, width=190, height=34)
+        self.dc_lock_btn.pack(side="right")
+        self.dc_default_btn = secondary_button(bar, "Khôi phục mặc định", self._discord_defaults, width=160, height=34)
+
         box = card(tab)
-        box.pack(fill="x", padx=10, pady=(10, 0))
+        box.pack(fill="x", padx=10, pady=(8, 0))
         self.dc_on = ctk.CTkSwitch(box, text="Gửi thống kê lên Discord lúc 00:00 mỗi ngày", font=font(15, True),
                                    text_color=C["text"], progress_color=C["accent"])
         self.dc_on.select() if dc["on"] else self.dc_on.deselect()
@@ -535,7 +544,7 @@ class SettingsWindow(ctk.CTkToplevel):
             secondary_button(row, "Gửi thử", self._test_webhook, width=100, height=36).pack(side="left", padx=(10, 0))
         self.dc_note = ctk.CTkLabel(box, text="", font=font(12, True), text_color=C["muted"], height=18)
         self.dc_note.pack(anchor="w", padx=20)
-        ctk.CTkLabel(box, text="Báo cáo gồm số xe vào / ra, xe còn trong bãi, tiền thu và file Excel danh sách xe "
+        ctk.CTkLabel(box, text="Báo cáo là ảnh thẻ: số xe vào / ra, xe còn trong bãi, tiền thu, biểu đồ theo giờ "
                                "của ngày vừa qua. Máy tắt lúc 00:00 thì lần mở sau tự gửi bù.\n"
                                "Lấy webhook: chuột phải kênh → Chỉnh sửa kênh → Tích hợp → Webhook → "
                                "Webhook mới → Sao chép URL webhook.",
@@ -570,6 +579,50 @@ class SettingsWindow(ctk.CTkToplevel):
                                "OAuth2 → URL Generator → tích bot + applications.commands.",
                      font=font(12), text_color=C["muted"], justify="left").pack(anchor="w", padx=20, pady=(4, 14))
         self._show_bot_state()
+        self._set_discord_locked(True)
+
+    def _discord_inputs(self):
+        return (self.dc_on, self.dc_webhook, self.dc_bot, self.dc_token, self.dc_channel)
+
+    def _set_discord_locked(self, locked):
+        """Khóa: không sửa được, che địa chỉ webhook. Mở khóa: sửa tự do, hiện nút Khôi phục mặc định."""
+        self.dc_locked = locked
+        state = "disabled" if locked else "normal"
+        for widget in self._discord_inputs():
+            widget.configure(state=state)
+        self.dc_webhook.configure(show="•" if locked else "")
+        self.dc_lock_btn.configure(text="🔓  Mở khóa để thay đổi" if locked else "🔒  Khóa lại")
+        if locked:
+            self.dc_default_btn.pack_forget()
+        else:
+            self.dc_default_btn.pack(side="right", padx=(0, 8))
+        self._show_discord_source()
+
+    def _show_discord_source(self):
+        current, error = self._read_discord()
+        same = current == discord_defaults() if current else False
+        if self.dc_locked:
+            text = ("🔒  Đang khóa — dùng webhook và bot mặc định gắn sẵn trong phần mềm" if same
+                    else "🔒  Đang khóa — đã đổi khác bản mặc định")
+            self.dc_lock_note.configure(text=text, text_color=C["muted"])
+        else:
+            self.dc_lock_note.configure(text="🔓  Đã mở khóa — sửa xong bấm Lưu cài đặt", text_color=C["warn"])
+
+    def _toggle_discord_lock(self):
+        self._set_discord_locked(not self.dc_locked)
+
+    def _discord_defaults(self):
+        """Đưa các ô về webhook / token gắn sẵn trong phần mềm."""
+        d = discord_defaults()
+        for switch, on in ((self.dc_on, d["on"]), (self.dc_bot, d["bot_on"])):
+            switch.select() if on else switch.deselect()
+        for field, value in ((self.dc_webhook, d["webhook"]), (self.dc_token, d["bot_token"]),
+                             (self.dc_channel, d["channel"])):
+            field.delete(0, "end")
+            if value:
+                field.insert(0, value)
+        self.dc_note.configure(text="Đã điền lại bản mặc định — bấm Lưu cài đặt để dùng", text_color=C["muted"])
+        self._show_discord_source()
 
     def _show_bot_state(self):
         """Trạng thái bot cập nhật liên tục trong lúc mở Cài đặt."""

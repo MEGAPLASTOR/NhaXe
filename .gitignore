@@ -6,3 +6,6 @@ cong_cu/build_*.log
 giong_doc/
 # câu đọc đã tạo sẵn, máy nào tự tạo máy đó
 data/am_thanh/
+# webhook / token Discord mặc định (đóng gói vào exe) — không đưa lên git
+assets/mac_dinh.ini
+data/discord.json
